@@ -1,0 +1,16 @@
+{
+  "name": "socket-group-chat",
+  "version": "1.0.0",
+  "description": "Group chat socket example",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.17.1",
+    "mustache-express": "^1.3.0",
+    "socket.io": "^2.3.0"
+  }
+}
