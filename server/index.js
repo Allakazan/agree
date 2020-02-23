@@ -4,6 +4,8 @@ var http = require('http').createServer(app);
 var io = require('socket.io')(http);
 var mustacheExpress = require('mustache-express');
 
+const Avatar = require('avatar-builder');
+
 const rooms = require('./model/rooms');
 const api = require('./api');
 
@@ -42,6 +44,14 @@ app.get('/chat/:room', function(req, res, next) {
     res.sendFile(path.join(__dirname, 'dist/index.html'));
 });*/
 
+
+const avatarGenerator = Avatar.builder(
+    Avatar.Image.circleMask(
+        Avatar.Image.identicon()
+    ),
+    64, 64, {cache: Avatar.Cache.lru()}
+)
+
 var connectedUsers = {}
 
 const chat = io.of('/chat');
@@ -50,19 +60,25 @@ chat.on('connection', function(socket){
     console.log('a user connected')
 
     socket.on('join-request', function(data) {
+
         socket.join(data.roomId, function () {
-            connectedUsers[socket.id] = {
-                id: socket.id,
-                room: data.roomId,
-                name: data.userName
-            }
 
-            chat.to(data.roomId).emit('new-user-joined-room', connectedUsers[socket.id]);
-
+            avatarGenerator.create(socket.id)
+            .then(buffer => 'data:image/png;base64, ' + buffer.toString('base64'))
+            .then((blob) => {
+                connectedUsers[socket.id] = {
+                    id: socket.id,
+                    room: data.roomId,
+                    name: data.userName,
+                    avatar: blob
+                }
+    
+                chat.to(data.roomId).emit('new-user-joined-room', connectedUsers[socket.id]);
+            })
         });
 
         socket.on('send-message', function(data) {
-            chat.to(data.roomId).emit('new-message', {msg: data.msg, sender: connectedUsers[socket.id]})
+            chat.to(data.roomId).emit('new-message', {msg: data.msg, sender: connectedUsers[socket.id], timestamp: Date.now()})
         })
     
         socket.on('disconnect', function(){

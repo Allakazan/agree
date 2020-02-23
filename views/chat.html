@@ -62,9 +62,13 @@
             grid-template-columns: 50px 1fr;
         }
 
+        .message-wrapper li:hover {
+            background-color: var(--background-message-hover)
+        }
+
         .message-wrapper li .image-wrapper img {
             width: 100%;
-            border-radius: 100%;
+            /*border-radius: 100%;*/
         }
 
         .message-wrapper li .text-wrapper {
@@ -108,12 +112,15 @@
         </div>
     </div>
     <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/hustcc/timeago.js@3.0.0/dist/timeago.min.js"></script>
     <script>
         (function () {
 
             let $ = (e) => document.querySelector(e)
             let userName = sessionStorage.getItem('selectedUsername')
             let roomId = document.body.dataset.roomId
+
+            let timeAgo = new timeago()
 
             if (!userName) {
                 window.location = "/"
@@ -140,14 +147,18 @@
                         'beforeend',
                         `<li>
                             <div class="image-wrapper">
-                                <img src="https://i.imgur.com/izzpeRb.jpg"/>
+                                <img src="${data.sender.avatar}"/>
                             </div>
                             <div class="text-wrapper">
-                                <p class="title">${data.sender.name} <span class="date">Today 14:23</span></p>
+                                <p class="title">${data.sender.name} <span class="date timeago" datetime="${data.timestamp}"></span></p>
                                 <p class="msg">${data.msg}</p>  
                             </div>
                         </li>`
                     )
+
+                    timeAgo.render(document.querySelector('#messages li:last-child .timeago'));
+
+                    $('.board-wrapper').scrollTop = $('.board-wrapper').scrollHeight;
                 })
             })
 
