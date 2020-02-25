@@ -30,6 +30,8 @@
     --primary-color-alt: #6B7FC5;
 
     --loading: #7289DA;
+
+    --sidebar-width: 300px;
 }
 
 ::-webkit-scrollbar{width:8px}

@@ -5,7 +5,7 @@ html, body {
 .container {
     background-color: var(--background-primary);
     display: grid;
-    grid-template-columns: 300px 1fr;
+    grid-template-columns: var(--sidebar-width) 1fr;
     height: 100%;
 }
 
@@ -86,4 +86,33 @@ html, body {
 .message-wrapper li .text-wrapper .msg {
     color: var(--text-normal);
     font-size: .95rem;
+}
+
+.user-area {
+    width: var(--sidebar-width);
+    position: fixed;
+    bottom: 0;
+    background-color: var(--background-secondary-alt);
+    display: grid;
+    grid-template-columns: 50px 1fr;
+}
+
+.user-area .thumb-wrapper img {
+    width: 100%;
+    padding: 8px
+}
+
+.user-area .user-area-data {
+    padding-left: 3px;
+}
+
+.user-area .user-area-data .username {
+    color: var(--header-primary);
+    font-size: .9rem;
+    margin-top: 12px
+}
+
+.user-area .user-area-data .userid {
+    color: var(--header-secondary);
+    font-size: .8rem
 }

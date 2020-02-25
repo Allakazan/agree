@@ -70,7 +70,8 @@ chat.on('connection', function(socket){
                     id: socket.id,
                     room: data.roomId,
                     name: data.userName,
-                    avatar: blob
+                    avatar: blob,
+                    usertag: '#'+ new Date().getMilliseconds().toString().padStart(4, 0)
                 }
     
                 chat.to(data.roomId).emit('new-user-joined-room', connectedUsers[socket.id]);
