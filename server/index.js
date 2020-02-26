@@ -2,6 +2,7 @@ var app = require('express')();
 var path = require('path');
 var http = require('http').createServer(app);
 var io = require('socket.io')(http);
+var escape = require('escape-html');
 var mustacheExpress = require('mustache-express');
 
 const Avatar = require('avatar-builder');
@@ -79,7 +80,7 @@ chat.on('connection', function(socket){
         });
 
         socket.on('send-message', function(data) {
-            chat.to(data.roomId).emit('new-message', {msg: data.msg, sender: connectedUsers[socket.id], timestamp: Date.now()})
+            chat.to(data.roomId).emit('new-message', {msg: escape(data.msg), sender: connectedUsers[socket.id], timestamp: Date.now()})
         })
     
         socket.on('disconnect', function(){
