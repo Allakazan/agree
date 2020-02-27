@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
-const rooms = require('./model/rooms');
+const rooms = require('../model/rooms');
 
 router.get('/', (req, res) => {
     res.set('Content-Type', 'application/json');

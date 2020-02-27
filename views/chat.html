@@ -54,7 +54,7 @@
                 socket.on('new-user-joined-room', function (joinedUser) {
                     if (joinedUser.id == socket.id) {
                         $('.user-area .thumb-wrapper img').setAttribute('src', joinedUser.avatar)
-                        $('.user-area .user-area-data .username').innerText = joinedUser.name
+                        $('.user-area .user-area-data .username').innerHTML = joinedUser.name
                         $('.user-area .user-area-data .userid').innerText = joinedUser.usertag
                     } else {
 
