@@ -36,6 +36,10 @@ module.exports = function(io) {
                 })
             });
     
+            socket.on('get-all-users-in-room', function(data, callback) {
+                callback(connectedUsers)
+            });
+
             socket.on('send-message', function(data) {
                 chat.to(data.roomId).emit('new-message', {msg: escape(data.msg), sender: connectedUsers[socket.id], timestamp: Date.now()})
             })

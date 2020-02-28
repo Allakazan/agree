@@ -2,7 +2,7 @@
 <html>
 
 <head>
-    <title>Agree {{ room.data.name }} server</title>
+    <title>{{ room.data.name }} server</title>
     <link rel="stylesheet" type="text/css" href="/css/global.css" />
     <link rel="stylesheet" type="text/css" href="/css/chat.css" />
 </head>
@@ -10,6 +10,13 @@
 <body data-room-id="{{ room.id }}">
     <div class="container">
         <div class="sidebar">
+            <div class="room-area" style="--bg-room: url({{ room.img }})">
+                <h1>{{ room.data.name }} room</h1>
+            </div>
+            <div class="list-users-area">
+                <p class="user-count">Na Sala - <span id="userCount" data-count=""></span></p>
+                <ul class="connected-users"></ul>
+            </div>            
             <div class="user-area">
                 <div class="thumb-wrapper">
                     <a href="#"><img src=""/></a>
@@ -48,6 +55,21 @@
 
             let socket = io('/chat')
 
+            let addConnectedUserList = function (user) {
+                $('.connected-users').insertAdjacentHTML(
+                    'beforeend',
+                    `<li data-id="${user.id}">
+                        <div class="c-thumb-wrapper">
+                            <a href="#"><img src="${user.avatar}"/></a>
+                        </div>
+                        <div class="c-user-area-data">
+                            <p class="c-username">${user.name}</p>
+                            <span class="c-userid">${user.usertag}</span>
+                        </div>
+                    </li>`
+                )
+            }
+
             socket.on('connect', () => {
                 socket.emit('join-request', { roomId: roomId, userName: userName })
 
@@ -56,9 +78,22 @@
                         $('.user-area .thumb-wrapper img').setAttribute('src', joinedUser.avatar)
                         $('.user-area .user-area-data .username').innerHTML = joinedUser.name
                         $('.user-area .user-area-data .userid').innerText = joinedUser.usertag
-                    } else {
 
+                        socket.emit('get-all-users-in-room', {}, function (joinedUsers) {
+                            Object.keys(joinedUsers).map(function(userId) {
+                                addConnectedUserList(joinedUsers[userId])
+                            })
+                            $("#userCount").dataset.count = Object.keys(joinedUsers).length
+                        })
+                    } else {
+                        addConnectedUserList(joinedUser)
+                        $("#userCount").dataset.count = parseInt($("#userCount").dataset.count) + 1
                     }
+                })
+
+                socket.on('user-disconnected', function (id) {
+                    $(".connected-users li[data-id='"+id+"']").remove()
+                    $("#userCount").dataset.count = parseInt($("#userCount").dataset.count) - 1
                 })
 
                 $('form').addEventListener('submit', function (e) {

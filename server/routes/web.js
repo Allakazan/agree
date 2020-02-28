@@ -10,6 +10,10 @@ let findRoom = function (room, callback) {
     return callback(null, rooms[room]);
 };
 
+let urlFriendly = function(str) {
+    return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(' ','-').toLowerCase()
+}
+
 router.get('/', function(req, res) {
     res.render('index')
 });
@@ -19,7 +23,13 @@ router.get('/chat/:room', function(req, res, next) {
 
     findRoom(room, function(error, roomObj) {
         if (error) return next(error);
-        return res.render('chat', {room: {id: room, data: roomObj}})
+        return res.render('chat', {
+            room: {
+                id: room,
+                data: roomObj,
+                img: '/img/'+ urlFriendly(roomObj.name) + '.jpg'
+            }
+        })
     });
 });
 

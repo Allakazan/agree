@@ -116,3 +116,72 @@ html, body {
     color: var(--header-secondary);
     font-size: .8rem
 }
+
+.room-area {
+    padding: 17px;
+    background: linear-gradient(0deg, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.2));
+    background-image: var(--bg-room);
+    background-size: cover !important;
+    background-position: center;
+    background-repeat: no-repeat;
+    min-height: 160px;
+    -webkit-box-shadow: inset 0px 57px 67px -24px rgba(0,0,0,0.75);
+    -moz-box-shadow: inset 0px 57px 67px -24px rgba(0,0,0,0.75);
+    box-shadow: inset 0px 57px 67px -24px rgba(0,0,0,0.75)
+}
+
+.room-area h1 {
+    text-transform: uppercase;
+    color: var(--header-primary);
+    font-size: .92rem;
+}
+
+.list-users-area .user-count {
+    text-transform: uppercase;
+    color: var(--header-secondary);
+    font-size: 0.75rem;
+    font-weight: 600;
+    -webkit-text-stroke: 0.3px;
+    padding-left: 15px;
+    padding-top: 15px;
+    margin-top: 5px;
+}
+
+.list-users-area .user-count span::before {
+    content: attr(data-count);
+}
+
+.connected-users {
+    padding: 15px 0;
+}
+
+.connected-users li {
+    width: var(--sidebar-width);
+    display: grid;
+    padding-left: 12px;
+    grid-template-columns: 50px 1fr;
+}
+
+.connected-users li:hover {
+    background-color: var(--background-modifier-hover)
+}
+
+.connected-users li .c-thumb-wrapper img {
+    width: 100%;
+    padding: 8px
+}
+
+.connected-users li .c-user-area-data {
+    padding-left: 3px;
+}
+
+.connected-users li .c-user-area-data .c-username {
+    color: var(--header-primary);
+    font-size: .9rem;
+    margin-top: 12px
+}
+
+.connected-users li .c-user-area-data .c-userid {
+    color: var(--header-secondary);
+    font-size: .8rem
+}
