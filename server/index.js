@@ -16,6 +16,8 @@ app.set('view engine', 'html')
 app.set('views', path.resolve(__dirname+'/../views'))
 
 app.use(express.static(path.resolve(__dirname+'/../public')));
+app.use('/emoji-js',express.static(path.resolve(__dirname+'/../node_modules/emoji-js/lib')));
+app.use('/emoji-data',express.static(path.resolve(__dirname+'/../node_modules/emoji-datasource')));
 
 app.use('/api', api);
 app.use('/', web);

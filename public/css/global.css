@@ -32,6 +32,8 @@
     --loading: #7289DA;
 
     --sidebar-width: 300px;
+
+    --emoji-size: 1.4em;
 }
 
 ::-webkit-scrollbar{width:8px}

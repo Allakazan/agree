@@ -1,5 +1,6 @@
 const escape = require('escape-html');
 const avatar = require('avatar-builder');
+const emoji = require('emoji-js');
 const rooms = require('../model/rooms');
 
 module.exports = function(io) {
@@ -10,7 +11,19 @@ module.exports = function(io) {
         ),
         64, 64, {cache: avatar.Cache.lru()}
     )
-    
+
+    const emojiParser = new emoji.EmojiConvertor()
+
+    let escapeMessage = function(str) {
+
+        str = escape(str)
+
+        emojiParser.colons_mode = true
+        str = emojiParser.replace_unified(str)
+
+        return str
+    }
+
     let connectedUsers = {}
     const chat = io.of('/chat');
 
@@ -41,7 +54,7 @@ module.exports = function(io) {
             });
 
             socket.on('send-message', function(data) {
-                chat.to(data.roomId).emit('new-message', {msg: escape(data.msg), sender: connectedUsers[socket.id], timestamp: Date.now()})
+                chat.to(data.roomId).emit('new-message', {msg: escapeMessage(data.msg), sender: connectedUsers[socket.id], timestamp: Date.now()})
             })
         
             socket.on('disconnect', function() {

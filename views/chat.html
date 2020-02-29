@@ -5,6 +5,7 @@
     <title>{{ room.data.name }} server</title>
     <link rel="stylesheet" type="text/css" href="/css/global.css" />
     <link rel="stylesheet" type="text/css" href="/css/chat.css" />
+    <link rel="stylesheet" type="text/css" href="/css/emoji.css" />
 </head>
 
 <body data-room-id="{{ room.id }}">
@@ -39,6 +40,7 @@
         </div>
     </div>
     <script src="/socket.io/socket.io.js"></script>
+    <script src="/emoji-js/emoji.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/hustcc/timeago.js@3.0.0/dist/timeago.min.js"></script>
     <script>
         (function () {
@@ -48,6 +50,9 @@
             let roomId = document.body.dataset.roomId
 
             let timeAgo = new timeago()
+            let emoji = new EmojiConvertor()
+            emoji.use_sheet = true
+            emoji.img_sets.apple.sheet = '/emoji-data/img/twitter/sheets/32.png';
 
             if (!userName) {
                 window.location = "/"
@@ -68,6 +73,25 @@
                         </div>
                     </li>`
                 )
+            }
+
+            let parseMessage = function(str) {
+
+                str = str.replace(/(\*\*(.*?)\*\*)/g, function(match) {
+                    return '<b>'+match.slice(2,-2)+'</b>'
+                })
+
+                str = str.replace(/(\_\_(.*?)\_\_)/g, function(match) {
+                    return '<i>'+match.slice(2,-2)+'</i>'
+                })
+
+                str = str.replace(/(\~\~(.*?)\~\~)/g, function(match) {
+                    return '<s>'+match.slice(2,-2)+'</s>'
+                })
+
+                str = emoji.replace_colons(str)
+
+                return str
             }
 
             socket.on('connect', () => {
@@ -114,7 +138,7 @@
                             </div>
                             <div class="text-wrapper">
                                 <p class="title">${data.sender.name} <span class="date timeago" datetime="${data.timestamp}"></span></p>
-                                <p class="msg">${data.msg}</p>  
+                                <p class="msg">${parseMessage(data.msg)}</p>  
                             </div>
                         </li>`
                     )
