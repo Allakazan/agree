@@ -24,6 +24,14 @@ module.exports = function(io) {
         return str
     }
 
+    let connectUsersInRoom = function (id) {
+        return Object.fromEntries(
+            Object.entries(connectedUsers).filter((user) => {
+                return user[1].room == id
+            })
+        )
+    }
+
     let connectedUsers = {}
     const chat = io.of('/chat');
 
@@ -48,16 +56,20 @@ module.exports = function(io) {
                     console.log('\x1b[33m' + data.userName + '\x1b[0m connected in \x1b[32m' + rooms[data.roomId].name + '\x1b[0m room')
                 })
             });
-    
-            socket.on('get-all-users-in-room', function(data, callback) {
-                callback(connectedUsers)
-            });
+        })
 
-            socket.on('send-message', function(data) {
-                chat.to(data.roomId).emit('new-message', {msg: escapeMessage(data.msg), sender: connectedUsers[socket.id], timestamp: Date.now()})
-            })
-        
-            socket.on('disconnect', function() {
+        socket.on('get-all-users-in-room', function(room, callback) {
+            callback(connectUsersInRoom(room))
+        });
+
+        socket.on('send-message', function(data) {
+            chat.to(data.roomId).emit('new-message', {msg: escapeMessage(data.msg), sender: connectedUsers[socket.id], timestamp: Date.now()})
+        })
+    
+        socket.on('disconnect', function() {
+            // For unknown reasons the disconnect event fires at random moments
+            // This is a workaround to not crash the application
+            if (connectedUsers[socket.id]) {
                 let room = connectedUsers[socket.id].room
                 let name = connectedUsers[socket.id].name
     
@@ -65,9 +77,9 @@ module.exports = function(io) {
             
                 socket.leave(room)
                 chat.to(room).emit('user-disconnected', socket.id);
-
+    
                 console.log('\x1b[33m' + name + '\x1b[0m \x1b[41mdisconnected\x1b[0m from \x1b[32m' + rooms[room].name + '\x1b[0m room')
-            })
+            }
         })
     });
 

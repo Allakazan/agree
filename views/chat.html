@@ -96,57 +96,60 @@
 
             socket.on('connect', () => {
                 socket.emit('join-request', { roomId: roomId, userName: userName })
+            })
 
-                socket.on('new-user-joined-room', function (joinedUser) {
-                    if (joinedUser.id == socket.id) {
-                        $('.user-area .thumb-wrapper img').setAttribute('src', joinedUser.avatar)
-                        $('.user-area .user-area-data .username').innerHTML = joinedUser.name
-                        $('.user-area .user-area-data .userid').innerText = joinedUser.usertag
+            socket.on('new-user-joined-room', function (joinedUser) {
+                if (joinedUser.id == socket.id) {
+                    $('.user-area .thumb-wrapper img').setAttribute('src', joinedUser.avatar)
+                    $('.user-area .user-area-data .username').innerHTML = joinedUser.name
+                    $('.user-area .user-area-data .userid').innerText = joinedUser.usertag
 
-                        socket.emit('get-all-users-in-room', {}, function (joinedUsers) {
-                            Object.keys(joinedUsers).map(function(userId) {
-                                addConnectedUserList(joinedUsers[userId])
-                            })
-                            $("#userCount").dataset.count = Object.keys(joinedUsers).length
+                    socket.emit('get-all-users-in-room', joinedUser.room, function (joinedUsers) {
+                        // Fallback for node restart bugs
+                        $(".connected-users").innerHTML = ''
+
+                        Object.keys(joinedUsers).map(function(userId) {
+                            addConnectedUserList(joinedUsers[userId])
                         })
-                    } else {
-                        addConnectedUserList(joinedUser)
-                        $("#userCount").dataset.count = parseInt($("#userCount").dataset.count) + 1
-                    }
-                })
+                        $("#userCount").dataset.count = Object.keys(joinedUsers).length
+                    })
+                } else {
+                    addConnectedUserList(joinedUser)
+                    $("#userCount").dataset.count = parseInt($("#userCount").dataset.count) + 1
+                }
+            })
 
-                socket.on('user-disconnected', function (id) {
-                    $(".connected-users li[data-id='"+id+"']").remove()
-                    $("#userCount").dataset.count = parseInt($("#userCount").dataset.count) - 1
-                })
+            socket.on('user-disconnected', function (id) {
+                $(".connected-users li[data-id='"+id+"']").remove()
+                $("#userCount").dataset.count = parseInt($("#userCount").dataset.count) - 1
+            })
 
-                $('form').addEventListener('submit', function (e) {
-                    e.preventDefault()
-                    socket.emit('send-message', { roomId: roomId, msg: $('#inputMessage').value })
+            $('form').addEventListener('submit', function (e) {
+                e.preventDefault()
+                socket.emit('send-message', { roomId: roomId, msg: $('#inputMessage').value })
 
-                    $('#inputMessage').value = ''
+                $('#inputMessage').value = ''
 
-                    return false
-                })
+                return false
+            })
 
-                socket.on('new-message', function (data) {
-                    $('#messages').insertAdjacentHTML(
-                        'beforeend',
-                        `<li>
-                            <div class="image-wrapper">
-                                <img src="${data.sender.avatar}"/>
-                            </div>
-                            <div class="text-wrapper">
-                                <p class="title">${data.sender.name} <span class="date timeago" datetime="${data.timestamp}"></span></p>
-                                <p class="msg">${parseMessage(data.msg)}</p>  
-                            </div>
-                        </li>`
-                    )
+            socket.on('new-message', function (data) {
+                $('#messages').insertAdjacentHTML(
+                    'beforeend',
+                    `<li>
+                        <div class="image-wrapper">
+                            <img src="${data.sender.avatar}"/>
+                        </div>
+                        <div class="text-wrapper">
+                            <p class="title">${data.sender.name} <span class="date timeago" datetime="${data.timestamp}"></span></p>
+                            <p class="msg">${parseMessage(data.msg)}</p>  
+                        </div>
+                    </li>`
+                )
 
-                    timeAgo.render(document.querySelector('#messages li:last-child .timeago'));
+                timeAgo.render(document.querySelector('#messages li:last-child .timeago'));
 
-                    $('.board-wrapper').scrollTop = $('.board-wrapper').scrollHeight;
-                })
+                $('.board-wrapper').scrollTop = $('.board-wrapper').scrollHeight;
             })
 
         })()
