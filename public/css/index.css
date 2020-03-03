@@ -38,9 +38,7 @@ body {
     margin-bottom: 8px;
     font-weight: 300;
     text-align: center;
-    -webkit-text-stroke: 0.4px;
 }
-
 
 .section-wrapper .subtitle {
     color: var(--text-muted);
@@ -61,4 +59,17 @@ body {
 
 .hidden-section {
     display: none;
+}
+
+@media only screen and (max-width: 768px) {
+    .section-wrapper {
+        width: 95%;
+        padding: 20px;
+    }
+
+    .section-wrapper .subtitle {
+        font-size: .9rem;
+        line-height: 18px;
+        margin-top: 20px
+    }
 }

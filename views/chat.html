@@ -1,13 +1,13 @@
 <!doctype html>
 <html>
-
 <head>
     <title>{{ room.data.name }} server</title>
+    <meta name="theme-color" content="#2f3136">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" type="text/css" href="/css/global.css" />
     <link rel="stylesheet" type="text/css" href="/css/chat.css" />
     <link rel="stylesheet" type="text/css" href="/css/emoji.css" />
 </head>
-
 <body data-room-id="{{ room.id }}">
     <div class="container">
         <div class="sidebar">
@@ -53,6 +53,9 @@
             let emoji = new EmojiConvertor()
             emoji.use_sheet = true
             emoji.img_sets.apple.sheet = '/emoji-data/img/twitter/sheets/32.png';
+
+            // Preload image
+            new Image().src = emoji.img_sets.apple.sheet
 
             if (!userName) {
                 window.location = "/"
