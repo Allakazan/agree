@@ -1,3 +1,7 @@
+* {
+  margin: 0; padding: 0;
+}
+
 html {
     height: 100%;
 }
@@ -16,19 +20,21 @@ body {
     height: 100%;
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: left;
+    padding-left: 27vw;
 }
 
 .section-wrapper {
     width: 480px;
     padding: 40px;
     font-size: 18px;
-    color: var(--text-muted);
+    color: var(--text-normal);
     background: var(--background-primary);
     -webkit-box-shadow: 0 2px 10px 0 rgba(0,0,0,.2);
     box-shadow: 0 2px 10px 0 rgba(0,0,0,.2);
     border-radius: 5px;
     position: absolute;
+    z-index: 3
 }
 
 .section-wrapper .title {
@@ -41,11 +47,9 @@ body {
 }
 
 .section-wrapper .subtitle {
-    color: var(--text-muted);
+    color: var(--header-secondary);
     font-size: 1rem;
     line-height: 20px;
-    font-weight: 400;
-    -webkit-text-stroke: 0.4px;
     text-align: center
 }
 
@@ -61,7 +65,19 @@ body {
     display: none;
 }
 
+.blobCanvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 2
+}
+
 @media only screen and (max-width: 768px) {
+    .container {
+        justify-content: center;
+        padding-left: 0;
+    }
+    
     .section-wrapper {
         width: 95%;
         padding: 20px;

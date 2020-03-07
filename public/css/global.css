@@ -106,7 +106,18 @@ input[type=submit], button, a.btn {
 input[type=submit]:hover, button:hover, a.btn:hover {
     background-color: var(--primary-color-alt);
 }
+
+/* Hotfix for mozilla ugly select arrow */
+@supports (-moz-appearance:none) {
+
+    select {
+        -moz-appearance:none !important;
+        image-rendering: crisp-edges;
+        background: var(--background-secondary) url('data:image/gif;base64,R0lGODlhBgAGAJEAAFVVVX9/f9TU1CgmNyH5BAEAAAMALAAAAAAGAAYAAAIJlI82OHvtYBwFADs=') right center no-repeat !important;
+        background-position: calc(100% - 5px) center !important;
+    }
   
+}
 
 /* LOADING SPINNER */
 
