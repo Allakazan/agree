@@ -28,11 +28,13 @@
 
     --primary-color: #7289DA;
     --primary-color-alt: #6B7FC5;
-
+    --analog-one: #8966D1;
+    --analog-two: #716BDB;
+    --analog-three: #6B7FC5;
+    --analog-four: #6BA1DB;
     --loading: #7289DA;
 
     --sidebar-width: 300px;
-
     --emoji-size: 1.4em;
 }
 

@@ -1,5 +1,7 @@
 html, body {
-    height: 100%
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--background-secondary);
 }
 
 .container {
@@ -184,4 +186,45 @@ html, body {
 .connected-users li .c-user-area-data .c-userid {
     color: var(--header-secondary);
     font-size: .8rem
+}
+
+
+/* LOADING CHAT */
+
+.loading {
+    background-color: var(--background-secondary);
+    height: 100%;
+    overflow: hidden;
+    
+}
+
+div.loadingChat {
+  width: 30px;
+  height: 30px;
+  position: absolute;
+  top: 45%;
+  border-radius: 50%;
+}
+
+div.loadingChat:nth-child(1) {
+  background-color: var(--analog-one);
+  animation: moveLoading 2s infinite cubic-bezier(.2,.64,.81,.23);
+}
+div.loadingChat:nth-child(2) {
+  background-color: var(--analog-two);
+  animation: moveLoading 2s 150ms infinite cubic-bezier(.2,.64,.81,.23);
+}
+div.loadingChat:nth-child(3) {
+  background-color: var(--analog-three);
+  animation: moveLoading 2s 300ms infinite cubic-bezier(.2,.64,.81,.23);
+}
+div.loadingChat:nth-child(4) {
+  background-color: var(--analog-four);
+  animation: moveLoading 2s 450ms infinite cubic-bezier(.2,.64,.81,.23);
+}
+
+
+@keyframes moveLoading {
+  0% {left: 0%;}
+  100% {left:100%;}
 }

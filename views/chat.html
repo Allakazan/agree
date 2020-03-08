@@ -4,12 +4,19 @@
     <title>{{ room.data.name }} server</title>
     <meta name="theme-color" content="#2f3136">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/3.7.2/animate.min.css">
     <link rel="stylesheet" type="text/css" href="/css/global.css" />
     <link rel="stylesheet" type="text/css" href="/css/chat.css" />
     <link rel="stylesheet" type="text/css" href="/css/emoji.css" />
 </head>
 <body data-room-id="{{ room.id }}">
-    <div class="container">
+    <div class="loading animated fadeIn">
+        <div class="loadingChat"></div>
+        <div class="loadingChat"></div>
+        <div class="loadingChat"></div>
+        <div class="loadingChat"></div>
+    </div>
+    <div class="container" style="display: none">
         <div class="sidebar">
             <div class="room-area" style="--bg-room: url({{ room.img }})">
                 <h1>{{ room.data.name }} room</h1>
@@ -63,6 +70,19 @@
 
             let socket = io('/chat')
 
+            let toggleLoading = function(loading) {
+                if (!loading) {
+                    $('.loading').style.display = 'none'
+                    $('.container').style.display = 'grid'
+                    
+                    $('.container').classList.add('animated', 'fadeIn', 'faster')
+                } else {
+                    $('.loading').style.display = 'block'
+                    $('.loading').classList.add('animated', 'fadeIn')
+                    $('.container').style.display = 'none'
+                }
+            }
+
             let addConnectedUserList = function (user) {
                 $('.connected-users').insertAdjacentHTML(
                     'beforeend',
@@ -98,6 +118,7 @@
             }
 
             socket.on('connect', () => {
+                toggleLoading(true)
                 socket.emit('join-request', { roomId: roomId, userName: userName })
             })
 
@@ -115,6 +136,9 @@
                             addConnectedUserList(joinedUsers[userId])
                         })
                         $("#userCount").dataset.count = Object.keys(joinedUsers).length
+
+                        //remove this later
+                        toggleLoading(false)
                     })
                 } else {
                     addConnectedUserList(joinedUser)
