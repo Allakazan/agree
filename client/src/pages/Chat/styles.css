@@ -1,33 +1,28 @@
-html, body {
-    height: 100%;
+.container-chat {
     overflow: hidden;
-    background-color: var(--background-secondary);
-}
-
-.container {
     background-color: var(--background-primary);
     display: grid;
     grid-template-columns: var(--sidebar-width) 1fr;
     height: 100%;
 }
 
-.sidebar {
+.container-chat .sidebar {
     background-color: var(--background-secondary);
 }
 
-.chat-wrapper {
+.container-chat .chat-wrapper {
     overflow: hidden;
     position: relative;
 }
 
-.chat-wrapper .bottom-section {
+.container-chat .chat-wrapper .bottom-section {
     width: 100%;
     padding: 0px 20px 20px 20px;
     position: absolute;
     bottom: 0;
 }
 
-.board-wrapper {
+.container-chat .board-wrapper {
     height: calc(100% - 76px);
     overflow-x: hidden; 
     overflow-x: auto; 
@@ -45,39 +40,39 @@ html, body {
     border-color: var(--interactive-muted);
 }
 
-.message-wrapper {
+.container-chat .message-wrapper {
     list-style-type: none;
     margin: 0;
     padding: 0;
 }
 
-.message-wrapper li {
+.container-chat .message-wrapper li {
     padding: 10px 22px;
     display: grid;
     grid-template-columns: 50px 1fr;
 }
 
-.message-wrapper li:hover {
+.container-chat .message-wrapper li:hover {
     background-color: var(--background-message-hover)
 }
 
-.message-wrapper li .image-wrapper img {
+.container-chat .message-wrapper li .image-wrapper img {
     width: 100%;
     /*border-radius: 100%;*/
 }
 
-.message-wrapper li .text-wrapper {
+.container-chat .message-wrapper li .text-wrapper {
     padding-left: 10px;
 }
 
-.message-wrapper li .text-wrapper .title {
+.container-chat .message-wrapper li .text-wrapper .title {
     color: var(--header-primary);
     -webkit-text-stroke: 0.1px;
     font-size: .95rem;
     line-height: 32px;
 }
 
-.message-wrapper li .text-wrapper .title .date {
+.container-chat .message-wrapper li .text-wrapper .title .date {
     color: var(--channels-default);
     font-size: .6rem;
     -webkit-text-stroke: 0px;
@@ -85,12 +80,12 @@ html, body {
     padding-left: 3px
 }
 
-.message-wrapper li .text-wrapper .msg {
+.container-chat .message-wrapper li .text-wrapper .msg {
     color: var(--text-normal);
     font-size: .95rem;
 }
 
-.user-area {
+.container-chat .user-area {
     width: var(--sidebar-width);
     position: fixed;
     bottom: 0;
@@ -99,27 +94,27 @@ html, body {
     grid-template-columns: 50px 1fr;
 }
 
-.user-area .thumb-wrapper img {
+.container-chat .user-area .thumb-wrapper img {
     width: 100%;
     padding: 8px
 }
 
-.user-area .user-area-data {
+.container-chat .user-area .user-area-data {
     padding-left: 3px;
 }
 
-.user-area .user-area-data .username {
+.container-chat .user-area .user-area-data .username {
     color: var(--header-primary);
     font-size: .9rem;
     margin-top: 12px
 }
 
-.user-area .user-area-data .userid {
+.container-chat .user-area .user-area-data .userid {
     color: var(--header-secondary);
     font-size: .8rem
 }
 
-.room-area {
+.container-chat .room-area {
     padding: 17px;
     background: linear-gradient(0deg, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.2));
     background-image: var(--bg-room);
@@ -132,13 +127,13 @@ html, body {
     box-shadow: inset 0px 57px 67px -24px rgba(0,0,0,0.75)
 }
 
-.room-area h1 {
+.container-chat .room-area h1 {
     text-transform: uppercase;
     color: var(--header-primary);
     font-size: .92rem;
 }
 
-.list-users-area .user-count {
+.container-chat .list-users-area .user-count {
     text-transform: uppercase;
     color: var(--header-secondary);
     font-size: 0.75rem;
@@ -149,41 +144,41 @@ html, body {
     margin-top: 5px;
 }
 
-.list-users-area .user-count span::before {
+.container-chat .list-users-area .user-count span::before {
     content: attr(data-count);
 }
 
-.connected-users {
+.container-chat .connected-users {
     padding: 15px 0;
 }
 
-.connected-users li {
+.container-chat .connected-users li {
     width: var(--sidebar-width);
     display: grid;
     padding-left: 12px;
     grid-template-columns: 50px 1fr;
 }
 
-.connected-users li:hover {
+.container-chat .connected-users li:hover {
     background-color: var(--background-modifier-hover)
 }
 
-.connected-users li .c-thumb-wrapper img {
+.container-chat .connected-users li .c-thumb-wrapper img {
     width: 100%;
     padding: 8px
 }
 
-.connected-users li .c-user-area-data {
+.container-chat .connected-users li .c-user-area-data {
     padding-left: 3px;
 }
 
-.connected-users li .c-user-area-data .c-username {
+.container-chat .connected-users li .c-user-area-data .c-username {
     color: var(--header-primary);
     font-size: .9rem;
     margin-top: 12px
 }
 
-.connected-users li .c-user-area-data .c-userid {
+.container-chat .connected-users li .c-user-area-data .c-userid {
     color: var(--header-secondary);
     font-size: .8rem
 }
@@ -191,40 +186,40 @@ html, body {
 
 /* LOADING CHAT */
 
-.loading {
+.container-chat .loading {
     background-color: var(--background-secondary);
     height: 100%;
     overflow: hidden;
     
 }
 
-div.loadingChat {
-  width: 30px;
-  height: 30px;
-  position: absolute;
-  top: 45%;
-  border-radius: 50%;
+.container-chat div.loadingChat {
+    width: 30px;
+    height: 30px;
+    position: absolute;
+    top: 45%;
+    border-radius: 50%;
 }
 
-div.loadingChat:nth-child(1) {
-  background-color: var(--analog-one);
-  animation: moveLoading 2s infinite cubic-bezier(.2,.64,.81,.23);
+.container-chat div.loadingChat:nth-child(1) {
+    background-color: var(--analog-one);
+    animation: moveLoading 2s infinite cubic-bezier(.2,.64,.81,.23);
 }
-div.loadingChat:nth-child(2) {
-  background-color: var(--analog-two);
-  animation: moveLoading 2s 150ms infinite cubic-bezier(.2,.64,.81,.23);
+.container-chat div.loadingChat:nth-child(2) {
+    background-color: var(--analog-two);
+    animation: moveLoading 2s 150ms infinite cubic-bezier(.2,.64,.81,.23);
 }
-div.loadingChat:nth-child(3) {
-  background-color: var(--analog-three);
-  animation: moveLoading 2s 300ms infinite cubic-bezier(.2,.64,.81,.23);
+.container-chat div.loadingChat:nth-child(3) {
+    background-color: var(--analog-three);
+    animation: moveLoading 2s 300ms infinite cubic-bezier(.2,.64,.81,.23);
 }
-div.loadingChat:nth-child(4) {
-  background-color: var(--analog-four);
-  animation: moveLoading 2s 450ms infinite cubic-bezier(.2,.64,.81,.23);
+.container-chat div.loadingChat:nth-child(4) {
+    background-color: var(--analog-four);
+    animation: moveLoading 2s 450ms infinite cubic-bezier(.2,.64,.81,.23);
 }
 
 
 @keyframes moveLoading {
-  0% {left: 0%;}
-  100% {left:100%;}
+    0% {left: 0%;}
+    100% {left:100%;}
 }

@@ -1,43 +1,31 @@
-* {
-  margin: 0; padding: 0;
-}
-
-html {
+.container-index {
     height: 100%;
-}
-
-body {
     background-color: var(--background-tertiary);
     overflow: hidden;
     -webkit-user-select: none;
     -moz-user-select: none;
     -ms-user-select: none;
     user-select: none;
-    height: 100%;
-}
-
-.container {
-    height: 100%;
     display: flex;
     align-items: center;
     justify-content: left;
     padding-left: 27vw;
 }
 
-.section-wrapper {
+.container-index .section-wrapper {
     width: 480px;
     padding: 40px;
     font-size: 18px;
     color: var(--text-normal);
     background: var(--background-primary);
-    -webkit-box-shadow: 0 2px 10px 0 rgba(0,0,0,.2);
-    box-shadow: 0 2px 10px 0 rgba(0,0,0,.2);
+    -webkit-box-shadow: 0 2px 10px 0 rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 10px 0 rgba(0, 0, 0, 0.2);
     border-radius: 5px;
     position: absolute;
-    z-index: 3
+    z-index: 3;
 }
 
-.section-wrapper .title {
+.container-index .section-wrapper .title {
     color: var(--header-primary);
     font-size: 1.4rem;
     line-height: 24px;
@@ -46,46 +34,42 @@ body {
     text-align: center;
 }
 
-.section-wrapper .subtitle {
+.container-index .section-wrapper .subtitle {
     color: var(--header-secondary);
     font-size: 1rem;
     line-height: 20px;
-    text-align: center
+    text-align: center;
 }
 
-#userName {
-    margin-top: 30px;
+.container-index .userName {
+    margin-top: 30px !important;
 }
 
-.loading {
-    left: calc(50% - 40px)
+.container-index .loading {
+    left: calc(50% - 40px);
 }
 
-.hidden-section {
-    display: none;
-}
-
-.blobCanvas {
+.container-index .blobCanvas {
     position: fixed;
     top: 0;
     left: 0;
-    z-index: 2
+    z-index: 2;
 }
 
 @media only screen and (max-width: 768px) {
-    .container {
+    .container-index {
         justify-content: center;
         padding-left: 0;
     }
-    
-    .section-wrapper {
+
+    .container-index .section-wrapper {
         width: 95%;
         padding: 20px;
     }
 
-    .section-wrapper .subtitle {
-        font-size: .9rem;
+    .container-index .section-wrapper .subtitle {
+        font-size: 0.9rem;
         line-height: 18px;
-        margin-top: 20px
+        margin-top: 20px;
     }
 }
