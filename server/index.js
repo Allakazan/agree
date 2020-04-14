@@ -7,7 +7,7 @@ let mustacheExpress = require('mustache-express');
 
 const PORT = process.env.PORT || 5000
 
-const api = require('./routes/api');
+const api = require('./routes');
 
 app.engine('html', mustacheExpress())
 
