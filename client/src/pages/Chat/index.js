@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useHistory } from 'react-router-dom';
 import { Twemoji } from 'react-emoji-render';
 import io from 'socket.io-client';
@@ -23,6 +23,7 @@ export default function Chat({ match }) {
 
     const [connectedUsers, setConnectedUsers] = useState([]);
 
+    const chatWrapper = useRef();
     const [messageInput, setMessageInput] = useState('');
     const [receivedMessages, setReceivedMessages] = useState([]);
 
@@ -95,6 +96,8 @@ export default function Chat({ match }) {
                 }
 
                 setReceivedMessages(receivedMessages => [...receivedMessages, message])
+
+                chatWrapper.current.scrollTop = chatWrapper.current.scrollHeight
             });
 
             return () => socket.close();
@@ -144,7 +147,7 @@ export default function Chat({ match }) {
                 </div>
             </div>
             <div className="chat-wrapper">
-                <div className="board-wrapper">
+                <div className="board-wrapper" ref={chatWrapper}>
                     <ul className="message-wrapper">
                         {receivedMessages.map(message => (
                             <li key={message.timestamp}>
