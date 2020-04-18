@@ -36,27 +36,28 @@ module.exports = function(io) {
     
         socket.on('join-request', function(data) {
 
-            socket.join(data.roomId, function () {
-                const room = rooms.find(x => x.id == data.roomId);
-                const user = findUserByIDAndRoom(data.userId, data.roomId);
+            socket.join(data.room, function () {
+                const room = rooms.find(x => x.id == data.room);
+                const user = findUserByIDAndRoom(data.id, data.room);
                 
                 if (user) {
                     connectedUsers[connectedUsers.indexOf(user)].socket.push(socket.id);
                     socket.emit('user-joined-new-tab');
                 } else {
                     const newUser = {
-                        id: data.userId,
+                        id: data.id,
                         socket: [ socket.id ],
-                        room: data.roomId,
-                        name: data.userName,
-                        usertag: data.userTag
+                        room: data.room,
+                        name: data.name,
+                        tag: data.tag,
+                        avatar: data.avatar
                     };
     
                     connectedUsers.push(newUser);
-                    chat.to(data.roomId).emit('new-user-joined-room', {socket: socket.id, user: newUser});
+                    chat.to(data.room).emit('new-user-joined-room', {socket: socket.id, user: newUser});
                 }
 
-                console.log('\x1b[33m' + data.userName + '\x1b[0m connected in \x1b[32m' + room.name + '\x1b[0m room');
+                console.log('\x1b[33m' + data.name + '\x1b[0m connected in \x1b[32m' + room.name + '\x1b[0m room');
             });
         })
 

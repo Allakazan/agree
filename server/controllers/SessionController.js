@@ -2,6 +2,7 @@ const escape = require('escape-html');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 
+const { createAvatar } = require('../services/Media');
 
 module.exports = {
     async index(request, response) {
@@ -17,11 +18,13 @@ module.exports = {
     },
     async create(request, response) {
         const { username } = request.body;
+        const id = uuidv4();
 
         const data = {
-            id: uuidv4(),
+            id,
             name: escape(username),
-            tag: '#'+ new Date().getMilliseconds().toString().padStart(4, 0)
+            tag: '#'+ new Date().getMilliseconds().toString().padStart(4, 0),
+            avatar: await createAvatar(id)
         }
 
         const token = jwt.sign(

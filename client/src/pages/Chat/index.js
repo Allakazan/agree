@@ -38,18 +38,11 @@ export default function Chat({ match }) {
                 
                 if (!auth) throw new Error("Unauthorized access.");
     
-                const { avatar } = (await api.get(`media/${user.id}`)).data;
-
                 setRoomId(id);
                 setRoomName(name);
                 setRoomImage(images('./' + image));
     
-                setUserInfo({
-                    id: user.id,
-                    name: user.name,
-                    tag: user.tag,
-                    avatar
-                })
+                setUserInfo(user);
 
             } catch (err) {
                 console.log(err)
@@ -64,12 +57,7 @@ export default function Chat({ match }) {
             let socket = io('/chat')
 
             socket.on('connect', () => {
-                socket.emit('join-request', { 
-                    roomId,
-                    userId: userInfo.id,
-                    userName: userInfo.name,
-                    userTag: userInfo.tag
-                })
+                socket.emit('join-request', Object.assign({ room: roomId }, userInfo))
             })
 
             socket.on('new-user-joined-room', (data) => {
@@ -104,11 +92,11 @@ export default function Chat({ match }) {
                         {connectedUsers.map(user => (
                             <li key={user.id}>
                                 <div className="c-thumb-wrapper">
-                                    <a href="#"><img src=""/></a>
+                                    <a href="#"><img src={user.avatar}/></a>
                                 </div>
                                 <div className="c-user-area-data">
                                     <p className="c-username">{user.name}</p>
-                                    <span className="c-userid">{user.usertag}</span>
+                                    <span className="c-userid">{user.tag}</span>
                                 </div>
                             </li>
                         ))}

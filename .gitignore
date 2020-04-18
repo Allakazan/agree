@@ -1,3 +1,7 @@
 /node_modules
-/tmp
 .env
+
+# ignore avatar images
+server/storage/avatar/*
+# but keep the avatar folder
+!server/storage/avatar/.gitkeep
