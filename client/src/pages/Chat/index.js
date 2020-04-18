@@ -22,6 +22,11 @@ export default function Chat({ match }) {
 
     const [connectedUsers, setConnectedUsers] = useState([]);
 
+    const [messageInput, setMessageInput] = useState('');
+    const [receivedMessages, setReceivedMessages] = useState([]);
+
+    const [socket] = useState(io('/chat', { autoConnect: false }));
+
     const history = useHistory();
 
     useEffect(() => {
@@ -53,8 +58,11 @@ export default function Chat({ match }) {
     }, [room, history, images]);
 
     useEffect(() => {
-        if (userInfo.id) {
-            let socket = io('/chat')
+        if (userInfo.id && !socket.connected) {
+
+            socket.open()
+
+            /** Connection Events */
 
             socket.on('connect', () => {
                 socket.emit('join-request', Object.assign({ room: roomId }, userInfo))
@@ -76,9 +84,31 @@ export default function Chat({ match }) {
                 setConnectedUsers(connectedUsers => connectedUsers.filter(user => user.id !== id))
             });
 
+            /** Message Events */
+
+            socket.on('new-message', ({ msg, sender, timestamp}) => {
+                const message = {
+                    msg,
+                    sender,
+                    timestamp
+                }
+
+                setReceivedMessages(receivedMessages => [...receivedMessages, message])
+            });
+
             return () => socket.close();
         }
-    }, [roomId, userInfo]);
+    }, [roomId, userInfo, socket]);
+
+    function handleChatInput(e) {
+        e.preventDefault();
+
+        if (messageInput !== '' && socket.connected) {
+            socket.emit('send-message', { room: roomId, user: userInfo.id, msg: messageInput });
+
+            setMessageInput('');
+        }
+    }
 
     return (
         <div className="container-chat">
@@ -92,7 +122,7 @@ export default function Chat({ match }) {
                         {connectedUsers.map(user => (
                             <li key={user.id}>
                                 <div className="c-thumb-wrapper">
-                                    <a href="#"><img src={user.avatar}/></a>
+                                    <img src={user.avatar} alt=""/>
                                 </div>
                                 <div className="c-user-area-data">
                                     <p className="c-username">{user.name}</p>
@@ -114,11 +144,24 @@ export default function Chat({ match }) {
             </div>
             <div className="chat-wrapper">
                 <div className="board-wrapper">
-                    <ul id="messages" className="message-wrapper"></ul>
+                    <ul className="message-wrapper">
+                        {receivedMessages.map(message => (
+                            <li key={message.timestamp}>
+                                <div className="image-wrapper">
+                                    <img src={message.sender.avatar} alt=""/>
+                                </div>
+                                <div className="text-wrapper">
+                                    <p className="title">{message.sender.name} <span className="date timeago">{message.timestamp}</span></p>
+                                    <p className="msg">{message.msg}</p>  
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
                 </div>
                 <div className="bottom-section">
-                    <form action="">
-                        <input id="inputMessage" type="text" autoComplete="off" placeholder={`Talk in ${roomName} room`} />
+                    <form onSubmit={handleChatInput}>
+                        <input id="inputMessage" type="text" autoComplete="off" placeholder={`Talk in ${roomName} room`} 
+                            value={messageInput} onChange={e => setMessageInput(e.target.value)} />
                     </form>
                 </div>
             </div>

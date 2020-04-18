@@ -1,4 +1,3 @@
-const escape = require('escape-html');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 
@@ -22,7 +21,7 @@ module.exports = {
 
         const data = {
             id,
-            name: escape(username),
+            name: username,
             tag: '#'+ new Date().getMilliseconds().toString().padStart(4, 0),
             avatar: await createAvatar(id)
         }
