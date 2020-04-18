@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useHistory } from 'react-router-dom';
 import { Twemoji } from 'react-emoji-render';
+import Moment from 'react-moment';
 import io from 'socket.io-client';
 import api from '../../services/api'
 
@@ -155,7 +156,7 @@ export default function Chat({ match }) {
                                     <img src={message.sender.avatar} alt=""/>
                                 </div>
                                 <div className="text-wrapper">
-                                    <p className="title">{message.sender.name} <span className="date timeago">{message.timestamp}</span></p>
+                                    <p className="title">{message.sender.name} <Moment fromNow interval={30000} element="span" className="date">{message.timestamp}</Moment></p>
                                     <p className="msg"><Twemoji text={message.msg} className='agree-emoji' onlyEmojiClassName="agree-emoji-large" /></p>  
                                 </div>
                             </li>
