@@ -22,9 +22,13 @@ export default function Index() {
         })
     }, []);
 
-    async function handleNewUser(e) {
+    async function handleRegister(e) {
         e.preventDefault()
+        setLoading(true)
 
+        const { token } = (await api.post('auth', { username: userName })).data
+        
+        localStorage.setItem('auth', token);
         history.push(`/chat/${selectedRoom}`)
     }
 
@@ -36,7 +40,7 @@ export default function Index() {
                     <p className="title header-primary">Welcome to Agree</p>
                     <p className="subtitle header-secondary">Welcome to my webchat, please input your user name and choose the server to start
                         talking !</p>
-                    <form onSubmit={handleNewUser}>
+                    <form onSubmit={handleRegister}>
                         <input 
                             type="text" className="userName" placeholder="Your Name" autoComplete="off"
                             value={userName}
