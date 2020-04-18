@@ -82,7 +82,8 @@
 
 .container-chat .message-wrapper li .text-wrapper .msg {
     color: var(--text-normal);
-    font-size: .95rem;
+    font-size: .94rem;
+    line-height: 1.5rem;
 }
 
 .container-chat .user-area {

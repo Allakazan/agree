@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useHistory } from 'react-router-dom';
+import { Twemoji } from 'react-emoji-render';
 import io from 'socket.io-client';
 import api from '../../services/api'
 
@@ -152,7 +153,7 @@ export default function Chat({ match }) {
                                 </div>
                                 <div className="text-wrapper">
                                     <p className="title">{message.sender.name} <span className="date timeago">{message.timestamp}</span></p>
-                                    <p className="msg">{message.msg}</p>  
+                                    <p className="msg"><Twemoji text={message.msg} className='agree-emoji' onlyEmojiClassName="agree-emoji-large" /></p>  
                                 </div>
                             </li>
                         ))}
