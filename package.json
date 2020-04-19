@@ -4,7 +4,8 @@
   "description": "Group chat socket example",
   "main": "server/index.js",
   "scripts": {
-    "start": "nodemon server/index.js",
+    "start": "node server/index.js",
+    "start:dev": "node node_modules/nodemon/bin/nodemon.js server/index.js",
     "heroku-postbuild": "cd client && npm install && npm run build"
   },
   "author": "",
