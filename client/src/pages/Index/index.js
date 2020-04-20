@@ -8,6 +8,8 @@ import CanvasAnimation from '../../components/CanvasAnimation'
 
 import './styles.css';
 
+import logo from '../../assets/logo.png';
+
 export default function Index() {
     const [rooms, setRooms] = useState([])
     const [loading, setLoading] = useState(true)
@@ -36,6 +38,7 @@ export default function Index() {
 
     return (
         <div className="container-index">
+            <img className="app-logo" src={logo} alt='Agree Logo'/>
             <section className="section-wrapper animated bounceIn">
                 {loading ? (
                     <div className="section-loading">
@@ -46,9 +49,8 @@ export default function Index() {
                 )
                 : (
                     <div>
-                        <p className="title header-primary">Welcome to Agree</p>
-                        <p className="subtitle header-secondary">Welcome to my webchat, please input your user name and choose the server to start
-                            talking !</p>
+                        <p className="title header-primary">Welcome again !</p>
+                        <p className="subtitle header-secondary">Agree is a messaging app for heroes. Let's chat !</p>
                         <form onSubmit={handleRegister}>
                             <input 
                                 type="text" className="userName" placeholder="Your Name" autoComplete="off"
@@ -56,7 +58,7 @@ export default function Index() {
                                 onChange={e => setUserName(e.target.value)}
                             />
                             <select onChange={e => setSelectedRoom(e.target.value)}>
-                                <option value={selectedRoom} defaultValue>Select server</option>
+                                <option value={selectedRoom} defaultValue>Select a server</option>
                                 {rooms.map(room => <option key={room.id} value={room.id}>{room.name}</option>)}
                             </select>
                             <button type="submit">Continue</button>
