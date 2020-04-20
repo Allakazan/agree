@@ -1,6 +1,17 @@
+.app-wrapper {
+    height: 100%;
+    background-color: var(--background-primary);
+}
+
+.container-loading {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .container-chat {
     overflow: hidden;
-    background-color: var(--background-primary);
     display: grid;
     grid-template-columns: var(--sidebar-width) 1fr;
     height: 100%;
@@ -182,45 +193,4 @@
 .container-chat .connected-users li .c-user-area-data .c-userid {
     color: var(--header-secondary);
     font-size: .8rem
-}
-
-
-/* LOADING CHAT */
-
-.container-chat .loading {
-    background-color: var(--background-secondary);
-    height: 100%;
-    overflow: hidden;
-    
-}
-
-.container-chat div.loadingChat {
-    width: 30px;
-    height: 30px;
-    position: absolute;
-    top: 45%;
-    border-radius: 50%;
-}
-
-.container-chat div.loadingChat:nth-child(1) {
-    background-color: var(--analog-one);
-    animation: moveLoading 2s infinite cubic-bezier(.2,.64,.81,.23);
-}
-.container-chat div.loadingChat:nth-child(2) {
-    background-color: var(--analog-two);
-    animation: moveLoading 2s 150ms infinite cubic-bezier(.2,.64,.81,.23);
-}
-.container-chat div.loadingChat:nth-child(3) {
-    background-color: var(--analog-three);
-    animation: moveLoading 2s 300ms infinite cubic-bezier(.2,.64,.81,.23);
-}
-.container-chat div.loadingChat:nth-child(4) {
-    background-color: var(--analog-four);
-    animation: moveLoading 2s 450ms infinite cubic-bezier(.2,.64,.81,.23);
-}
-
-
-@keyframes moveLoading {
-    0% {left: 0%;}
-    100% {left:100%;}
 }

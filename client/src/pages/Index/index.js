@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useHistory } from 'react-router-dom';
+import ReactLoading from 'react-loading';
+import FadeIn from 'react-fade-in';
 
 import api from '../../services/api'
 import CanvasAnimation from '../../components/CanvasAnimation'
@@ -35,24 +37,32 @@ export default function Index() {
     return (
         <div className="container-index">
             <section className="section-wrapper animated bounceIn">
-                <div className="lds-ring loading" style={{display: loading ? null : 'none'}}><div></div><div></div><div></div><div></div></div>
-                <div style={{display: loading ? 'none' : null}}>
-                    <p className="title header-primary">Welcome to Agree</p>
-                    <p className="subtitle header-secondary">Welcome to my webchat, please input your user name and choose the server to start
-                        talking !</p>
-                    <form onSubmit={handleRegister}>
-                        <input 
-                            type="text" className="userName" placeholder="Your Name" autoComplete="off"
-                            value={userName}
-                            onChange={e => setUserName(e.target.value)}
-                        />
-                        <select onChange={e => setSelectedRoom(e.target.value)}>
-                            <option value={selectedRoom} defaultValue>Select server</option>
-                            {rooms.map(room => <option key={room.id} value={room.id}>{room.name}</option>)}
-                        </select>
-                        <button type="submit">Continue</button>
-                    </form>
-                </div>
+                {loading ? (
+                    <div className="section-loading">
+                        <FadeIn>
+                            <ReactLoading type='bubbles' color='#7289da' width={80} />
+                        </FadeIn>
+                    </div>
+                )
+                : (
+                    <div>
+                        <p className="title header-primary">Welcome to Agree</p>
+                        <p className="subtitle header-secondary">Welcome to my webchat, please input your user name and choose the server to start
+                            talking !</p>
+                        <form onSubmit={handleRegister}>
+                            <input 
+                                type="text" className="userName" placeholder="Your Name" autoComplete="off"
+                                value={userName}
+                                onChange={e => setUserName(e.target.value)}
+                            />
+                            <select onChange={e => setSelectedRoom(e.target.value)}>
+                                <option value={selectedRoom} defaultValue>Select server</option>
+                                {rooms.map(room => <option key={room.id} value={room.id}>{room.name}</option>)}
+                            </select>
+                            <button type="submit">Continue</button>
+                        </form>
+                    </div>
+                )}
             </section>
             <CanvasAnimation/>
         </div>
