@@ -1,12 +1,26 @@
-# Agree
-:speech_balloon: The realtime Discord-like group chat written in Node.js and Express
+<p align="center"><img src="https://i.imgur.com/3QRRsnc.png" alt="Agree Logo"></p>
+
+#
+:speech_balloon: The realtime group chat for true heroes. Written in Node.js and React
 
 ## Live app
 
 https://agree-app.herokuapp.com
 
-## Usage
+## Install
 
-`npm i`
+`npm install`
 
-`node server/index.js`
+`cd client && npm install`
+
+## Development
+
+`npm run start:dev`
+
+`cd client && npm start`
+
+## Production Build
+
+`npm start`
+
+`cd client && npm run build`
