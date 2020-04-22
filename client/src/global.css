@@ -32,7 +32,8 @@
   --analog-two: #716bdb;
   --analog-three: #6b7fc5;
   --analog-four: #6ba1db;
-  --loading: #7289da;
+  
+  --error-color: #f04747;
 
   --sidebar-width: 300px;
   --emoji-size: 1.4em;
@@ -90,7 +91,19 @@ textarea {
   color: var(--channels-default);
 }
 
-input[type="text"],
+label {
+    font-size: .7rem;
+    line-height: 16px;
+    color: var(--channels-default);
+    font-weight: 600;
+    -webkit-text-stroke: 0.15px;
+}
+
+label.input-error {
+    color: var(--error-color);
+}
+
+input:not([type=submit]):not([type=file]),
 select {
   width: 100%;
   padding: 10px 20px;
@@ -105,14 +118,19 @@ select {
   transition: 0.4s ease;
 }
 
-input[type="text"]:hover,
+input:not([type=submit]):not([type=file]):hover,
 select:hover {
   border-color: var(--background-floating);
 }
 
-input[type="text"]:focus,
+input:not([type=submit]):not([type=file]):focus,
 select:focus {
   border-color: var(--primary-color-alt);
+}
+
+input:not([type=submit]):not([type=file]).input-error,
+select.input-error {
+    border-color: var(--error-color);
 }
 
 input[type="submit"],
