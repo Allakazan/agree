@@ -1,5 +1,4 @@
 const rooms = require('../model/rooms');
-const { urlFriendly } = require('../helpers/UrlHelper')
 
 module.exports = {
     index(request, response) {
@@ -14,7 +13,7 @@ module.exports = {
         return response.json({
             id: id,
             name: room.name,
-            image: urlFriendly(room.name) + '.jpg'
+            image: id + '.jpg'
         })
     }
 }

@@ -11,7 +11,7 @@ import './styles.css';
 
 export default function Chat({ match }) {
     const room = match.params.room;
-    const images = require.context('../../assets', true);
+    const images = require.context('../../assets/rooms', true);
 
     const [loading, setLoading] = useState(true);
 
