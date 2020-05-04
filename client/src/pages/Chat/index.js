@@ -6,6 +6,7 @@ import FadeIn from 'react-fade-in';
 import Moment from 'react-moment';
 import io from 'socket.io-client';
 import api from '../../services/api'
+import Notifications from '../../services/notifications'
 
 import './styles.css';
 
@@ -67,6 +68,7 @@ export default function Chat({ match }) {
     useEffect(() => {
         if (userInfo.id && !socket.connected) {
 
+            Notifications.init()
             socket.open()
 
             /** Connection Events */
@@ -105,10 +107,17 @@ export default function Chat({ match }) {
 
                 setReceivedMessages(receivedMessages => [...receivedMessages, message])
 
+                if (Notifications.shouldNotifyUser()) {
+                    Notifications.notify(`New message from ${sender.name}`)
+                }
+                
                 chatWrapper.current.scrollTop = chatWrapper.current.scrollHeight
             });
 
-            return () => socket.close();
+            return () => {
+                socket.close();
+                Notifications.destroy();
+            }
         }
     }, [roomId, userInfo, socket]);
 
