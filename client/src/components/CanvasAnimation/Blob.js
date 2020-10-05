@@ -44,8 +44,8 @@ export default class Blob {
         this.rampDamp = 25;
 
         this.fillGradient = context.createLinearGradient(0, 0, 0, 1400);
-        this.fillGradient.addColorStop(0, "#2f3136");
-        this.fillGradient.addColorStop(1, "#36393f");
+        this.fillGradient.addColorStop(0, "#2f2742");
+        this.fillGradient.addColorStop(1, "#663fc2");
     }
 
     /**

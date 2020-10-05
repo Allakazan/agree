@@ -1,17 +1,17 @@
 const NotificationAPI = {
     userActive: true,
     notificationPermission: false,
+    notificationDebounceTime: 30000,
     notificationOptions: {
         icon: '/favicon.ico'
     },
+    userNotified: false,
 
     handleActiveUser() {
-        console.log('ENTROU')
         NotificationAPI.userActive = true;
     },
 
     handleInativeUser() {
-        console.log('SAIU')
         NotificationAPI.userActive = false;
     },
 
@@ -32,13 +32,16 @@ const NotificationAPI = {
     },
 
     shouldNotifyUser() {
-        return !NotificationAPI.userActive;
+        return !NotificationAPI.userActive && !NotificationAPI.userNotified;
     },
 
     notify(message) {
         if (NotificationAPI.notificationPermission) {
-            const newNotification = new Notification(message, NotificationAPI.notificationOptions);
+            new Notification(message, NotificationAPI.notificationOptions);
             
+            NotificationAPI.userNotified = true;
+
+            setTimeout(() => NotificationAPI.userNotified = false, NotificationAPI.notificationDebounceTime)
         }
     }
 

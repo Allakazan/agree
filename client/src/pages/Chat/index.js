@@ -136,7 +136,7 @@ export default function Chat({ match }) {
             {loading ? (
                 <div className="container-loading">
                     <FadeIn transitionDuration='200'>
-                        <ReactLoading type='bubbles' color='#7289da' width={120} />
+                        <ReactLoading type='bubbles' color='#7248d8' width={120} />
                     </FadeIn>
                 </div>
             )

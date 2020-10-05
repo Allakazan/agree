@@ -51,7 +51,7 @@ export default function Index() {
                 {loading ? (
                     <div className="section-loading">
                         <FadeIn>
-                            <ReactLoading type='bubbles' color='#7289da' width={80} />
+                            <ReactLoading type='bubbles' color='#7248d8' width={80} />
                         </FadeIn>
                     </div>
                 )
