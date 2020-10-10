@@ -1,12 +1,13 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useHistory } from 'react-router-dom';
-import { Twemoji } from 'react-emoji-render';
 import ReactLoading from 'react-loading';
 import FadeIn from 'react-fade-in';
-import Moment from 'react-moment';
 import io from 'socket.io-client';
 import api from '../../services/api'
 import Notifications from '../../services/notifications'
+
+import Sidebar from './components/Sidebar'
+import TextChannel from './components/TextChannel'
 
 import './styles.css';
 
@@ -29,7 +30,7 @@ export default function Chat({ match }) {
 
     const [connectedUsers, setConnectedUsers] = useState([]);
 
-    const chatWrapper = useRef();
+    const channelRef = useRef();
     const [messageInput, setMessageInput] = useState('');
     const [receivedMessages, setReceivedMessages] = useState([]);
 
@@ -111,7 +112,7 @@ export default function Chat({ match }) {
                     Notifications.notify(`New message from ${sender.name}`)
                 }
                 
-                chatWrapper.current.scrollTop = chatWrapper.current.scrollHeight
+                channelRef.current.scrollToBottom();
             });
 
             return () => {
@@ -120,6 +121,10 @@ export default function Chat({ match }) {
             }
         }
     }, [roomId, userInfo, socket]);
+
+    function setInputValue(value) {
+        setMessageInput(value)
+    }
 
     function handleChatInput(e) {
         e.preventDefault();
@@ -142,61 +147,20 @@ export default function Chat({ match }) {
             )
             : (
                 <div className="container-chat">
-                    <div className="sidebar">
-                        <div className="room-area" style={{'--bg-room': `url(${roomImage})`}}>
-                            <h1>{roomName} room</h1>
-                        </div>
-                        <div className="list-users-area">
-                            <p className="user-count">Na Sala - <span id="userCount" data-count={connectedUsers.length}></span></p>
-                            <ul className="connected-users">
-                                {connectedUsers.map(user => (
-                                    <FadeIn transitionDuration='300' key={user.id}>
-                                        <li>
-                                            <div className="c-thumb-wrapper">
-                                                <img src={user.avatar} alt=""/>
-                                            </div>
-                                            <div className="c-user-area-data">
-                                                <p className="c-username">{user.name}</p>
-                                                <span className="c-userid">{user.tag}</span>
-                                            </div>
-                                        </li>
-                                    </FadeIn>
-                                ))}
-                            </ul>
-                        </div>            
-                        <div className="user-area">
-                            <div className="thumb-wrapper">
-                                <img src={userInfo.avatar} alt=""/>
-                            </div>
-                            <div className="user-area-data">
-                                <p className="username">{userInfo.name}</p>
-                                <span className="userid">{userInfo.tag}</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="chat-wrapper">
-                        <div className="board-wrapper" ref={chatWrapper}>
-                            <ul className="message-wrapper">
-                                {receivedMessages.map(message => (
-                                    <li key={message.timestamp}>
-                                        <div className="image-wrapper">
-                                            <img src={message.sender.avatar} alt=""/>
-                                        </div>
-                                        <div className="text-wrapper">
-                                            <p className="title">{message.sender.name} <Moment fromNow interval={30000} element="span" className="date">{message.timestamp}</Moment></p>
-                                            <p className="msg"><Twemoji text={message.msg} className='agree-emoji' onlyEmojiClassName="agree-emoji-large" /></p>  
-                                        </div>
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
-                        <div className="bottom-section">
-                            <form onSubmit={handleChatInput}>
-                                <input id="inputMessage" type="text" autoComplete="off" placeholder={`Talk in ${roomName} room`} 
-                                    value={messageInput} onChange={e => setMessageInput(e.target.value)} />
-                            </form>
-                        </div>
-                    </div>
+                    <Sidebar 
+                        roomName={roomName}
+                        roomImage={roomImage}
+                        users={connectedUsers}
+                        info={userInfo} 
+                    />
+                    <TextChannel
+                        loadedMessages={receivedMessages}
+                        inputValue={messageInput}
+                        setInputValue={setInputValue}
+                        sendMessage={handleChatInput}
+                        room={roomName}
+                        ref={channelRef}
+                    />
                 </div>
             )}
         </div>
