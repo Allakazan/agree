@@ -14,9 +14,6 @@ app.use(express.json());
 app.use('/api', api);
 app.use('/avatar', express.static(path.join(__dirname, '/storage/avatar')));
 
-// Needed to generate the HTTPS certificate
-app.use("/.well-known/acme-challenge", express.static(".well-known/acme-challenge"));
-
 // Serve react static files
 app.use(express.static(path.join(__dirname, '/../client/build')))
 
