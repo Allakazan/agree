@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Socket.IO Chat</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+      body {
+        font-family: sans-serif;
+        padding: 2rem;
+        background: #f4f4f4;
+      }
+      #messages {
+        margin-top: 1rem;
+        padding: 1rem;
+        border: 1px solid #ccc;
+        background: #fff;
+        max-height: 300px;
+        overflow-y: auto;
+      }
+      .message {
+        margin-bottom: 0.5rem;
+      }
+    </style>
+    <link
+      rel="stylesheet"
+      type="text/css"
+      href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css"
+    />
+  </head>
+  <body>
+    <h2>Socket.IO Message App 💌</h2>
+
+    <input type="text" id="messageInput" placeholder="Type your message..." />
+    <button id="sendButton">Send</button>
+
+    <div id="messages"></div>
+
+    <script
+      type="text/javascript"
+      src="https://cdn.jsdelivr.net/npm/toastify-js"
+    ></script>
+    <script>
+      const socket = io('http://127.0.0.1:4040/chat'); // Connects to the server
+
+      const input = document.getElementById('messageInput');
+      const button = document.getElementById('sendButton');
+      const messagesDiv = document.getElementById('messages');
+
+      const channelId = '6888ef43224fe720e5a48fbd';
+
+      // Emit message to server on button click
+      button.addEventListener('click', () => {
+        const msg = input.value.trim();
+        if (msg) {
+          socket.emit('chat', { message: msg, channelId });
+          input.value = '';
+        }
+      });
+
+      // Listen to broadcasted messages
+      socket.on(`channel:${channelId}:messages`, (msg) => {
+        const div = document.createElement('div');
+        div.classList.add('message');
+        div.textContent = msg;
+        messagesDiv.appendChild(div);
+      });
+
+      socket.on('error', (err) => {
+        console.error('Erro do servidor:', err);
+        Toastify({
+          text: `Error: ${err.message} ${(err.errors ?? []).reduce((acc, error) => `${acc} - ${JSON.stringify(error)}`, '')}`,
+          backgroundColor: 'red',
+          duration: 3000,
+        }).showToast();
+      });
+    </script>
+  </body>
+</html>

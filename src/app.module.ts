@@ -6,6 +6,7 @@ import { ServerModule } from './modules/server/server.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import database from './config/database';
+import { ChatModule } from './modules/chat/chat.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import database from './config/database';
       }),
     }),
     ServerModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [AppService],
