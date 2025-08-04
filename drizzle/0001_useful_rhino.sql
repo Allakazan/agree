@@ -1,0 +1,1 @@
+ALTER TABLE "conversations" ADD CONSTRAINT "unique_mongo_channel_id" UNIQUE("related_mongo_channel_id");

@@ -3,10 +3,40 @@ version: '3'
 services:
   mongo:
     image: mongo
+    container_name: nest_mongo
     restart: always
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: 1234
       MONGO_INITDB_DATABASE: agree
+    volumes:
+      - mongodata:/data/db
     ports:
-      - "27017:27017"
+      - '27017:27017'
+
+  postgres:
+    image: postgres:15
+    container_name: nest_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: nestapp
+      POSTGRES_USER: nestuser
+      POSTGRES_PASSWORD: nestpass
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - '5432:5432'
+
+  redis:
+    image: redis:7
+    container_name: nest_redis
+    restart: always
+    ports:
+      - '6379:6379'
+    volumes:
+      - redisdata:/data
+
+volumes:
+  pgdata:
+  mongodata:
+  redisdata:

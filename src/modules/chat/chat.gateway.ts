@@ -6,9 +6,19 @@ import {
 } from '@nestjs/websockets';
 import { Server } from 'socket.io';
 import { ChatMessageDto } from './dto/chat.dto';
-import { UseFilters, UsePipes } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  UseFilters,
+  UsePipes,
+} from '@nestjs/common';
 import { WsValidationPipe } from 'src/common/pipes/ws-validation.pipe';
 import { WsGlobalExceptionFilter } from 'src/common/filters/ws-exception.filter';
+import { DRIZZLE } from 'src/drizzle/drizzle.module';
+import { DrizzleDB } from 'src/drizzle/types/drizzle';
+import { conversations, messages } from 'src/drizzle/schema';
+import { sql } from 'drizzle-orm';
+import { ChatService } from './chat.service';
 
 @WebSocketGateway(4040, {
   namespace: 'chat',
@@ -19,17 +29,30 @@ import { WsGlobalExceptionFilter } from 'src/common/filters/ws-exception.filter'
 })
 @UseFilters(new WsGlobalExceptionFilter())
 export class ChatGateway {
+  constructor(
+    @Inject(DRIZZLE) private readonly drizzleService: DrizzleDB,
+    private readonly chatService: ChatService,
+  ) {}
+
   @WebSocketServer()
   server: Server;
 
   @SubscribeMessage('chat')
   @UsePipes(new WsValidationPipe())
-  handleEvent(@MessageBody() data: ChatMessageDto): any {
-    console.log(data.message);
-    console.log(data.channelId);
+  async handleEvent(
+    @MessageBody() { message, channelId }: ChatMessageDto,
+  ): Promise<any> {
+    try {
+      await this.chatService.createMessagesAndConversation(channelId, message);
 
-    this.server.emit(`channel:${data.channelId}:messages`, data.message);
+      this.server.emit(`channel:${channelId}:messages`, message);
 
-    return data;
+      return true;
+    } catch (error) {
+      console.error(error);
+      throw new BadRequestException(
+        error.message || 'Error at the message socket',
+      );
+    }
   }
 }
