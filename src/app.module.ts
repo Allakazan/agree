@@ -1,17 +1,23 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ServerModule } from './modules/server/server.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
-import database from './config/database';
+// Modules
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
+import { ServerModule } from './modules/server/server.module';
 import { ChatModule } from './modules/chat/chat.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { UsersModule } from './modules/users/users.module';
+
+// Config
+import database from './config/database';
+import auth from './config/auth';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
-      load: [database],
+      load: [database, auth],
       isGlobal: true,
     }),
     MongooseModule.forRootAsync({
@@ -23,6 +29,8 @@ import { ChatModule } from './modules/chat/chat.module';
     }),
     ServerModule,
     ChatModule,
+    AuthModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [AppService],
