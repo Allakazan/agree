@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsNumber,
   IsPositive,
@@ -7,6 +7,7 @@ import {
   IsISO8601,
   Max,
   MaxLength,
+  IsOptional,
 } from 'class-validator';
 import { IsObjectID } from 'src/common/decorators/isObjectID';
 
@@ -26,11 +27,15 @@ export class ListAllMessages {
   @IsNumber()
   @IsPositive()
   @Max(50)
-  @ApiProperty()
+  @ApiProperty({ example: 20 })
   limit: number;
 
+  @IsOptional()
   @IsString()
   @IsISO8601()
-  @ApiProperty()
-  before: string;
+  @ApiPropertyOptional({
+    example: '2025-08-10T18:00:00.000Z',
+    description: 'Filter messages before this UTC date',
+  })
+  before?: string;
 }

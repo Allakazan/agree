@@ -33,6 +33,7 @@ export class ChatService {
         senderUsername: '',
         senderAvatarUrl: '',
         content: message,
+        createdAt: new Date(), // Force UTC time
       })
       .returning();
 
@@ -40,16 +41,21 @@ export class ChatService {
   }
 
   async findAll(conversationId: string, { limit, before }: ListAllMessages) {
-    return await this.drizzleService
+    const rows = await this.drizzleService
       .select()
       .from(messages)
       .where(
         and(
           eq(messages.conversationId, conversationId),
-          lt(messages.createdAt, new Date(before)),
+          before ? lt(messages.createdAt, new Date(before)) : undefined,
         ),
       )
       .orderBy(desc(messages.createdAt))
       .limit(limit);
+
+    return rows.map((msg) => ({
+      ...msg,
+      createdAt: msg.createdAt!.toISOString(),
+    }));
   }
 }
