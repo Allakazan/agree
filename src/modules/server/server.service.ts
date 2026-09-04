@@ -9,7 +9,7 @@ export class ServerService {
   constructor(@InjectModel(Server.name) private serverModel: Model<Server>) {}
 
   async create(createServerDto: CreateServerDto): Promise<Server> {
-    return (new this.serverModel(createServerDto)).save();
+    return new this.serverModel(createServerDto).save();
   }
 
   async findAll(): Promise<Server[]> {

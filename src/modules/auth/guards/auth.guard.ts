@@ -33,8 +33,10 @@ export class AuthGuard implements CanActivate {
     const isWs = context.getType() === 'ws';
 
     const token = isWs
-      ? this.extractTokenFromSocket(context.switchToWs().getClient())
-      : this.extractTokenFromHeader(context.switchToHttp().getRequest());
+      ? this.extractTokenFromSocket(context.switchToWs().getClient<Socket>())
+      : this.extractTokenFromHeader(
+          context.switchToHttp().getRequest<Request>(),
+        );
 
     if (!token) {
       throw isWs
@@ -43,19 +45,24 @@ export class AuthGuard implements CanActivate {
     }
 
     try {
-      const payload = await this.jwtService.verifyAsync(token, {
+      const payload = await this.jwtService.verifyAsync<LoggedUser>(token, {
         secret: this.configService.get<string>('auth.secret'),
       });
 
       if (isWs) {
         // 💡 We're assigning the payload to the socket's data object here
         // so that we can access it in our gateway handlers via @User()
-        context.switchToWs().getClient<Socket>().data.user =
-          payload as LoggedUser;
+        (
+          context.switchToWs().getClient<Socket>().data as { user: LoggedUser }
+        ).user = payload;
       } else {
         // 💡 We're assigning the payload to the request object here
         // so that we can access it in our route handlers
-        context.switchToHttp().getRequest()['user'] = payload as LoggedUser;
+        (
+          context.switchToHttp().getRequest<Request>() as Request & {
+            user: LoggedUser;
+          }
+        ).user = payload;
       }
     } catch {
       throw isWs
@@ -75,7 +82,7 @@ export class AuthGuard implements CanActivate {
       client.handshake.headers.authorization?.split(' ') ?? [];
     if (type === 'Bearer' && headerToken) return headerToken;
 
-    const authToken = client.handshake.auth?.token;
+    const authToken: unknown = client.handshake.auth?.token;
     return typeof authToken === 'string' ? authToken : undefined;
   }
 }

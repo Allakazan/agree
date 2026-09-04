@@ -3,7 +3,6 @@ import {
   IsNumber,
   IsPositive,
   IsString,
-  IsTimeZone,
   IsISO8601,
   Max,
   MaxLength,

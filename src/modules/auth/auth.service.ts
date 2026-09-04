@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 
@@ -26,7 +22,10 @@ export class AuthService {
     if (!(await argon2.verify(user.password, pass)))
       throw new UnauthorizedException();
 
-    const payload = { sub: user.id, username: user.username } as LoggedUser;
+    const payload: LoggedUser = {
+      sub: String(user.id),
+      username: user.username,
+    };
     return {
       access_token: await this.jwtService.signAsync(payload),
     };

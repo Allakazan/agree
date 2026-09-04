@@ -82,5 +82,5 @@ seed()
     console.error('💥 Erro ao rodar seed:', err);
   })
   .finally(() => {
-    mongoose.disconnect();
+    void mongoose.disconnect();
   });

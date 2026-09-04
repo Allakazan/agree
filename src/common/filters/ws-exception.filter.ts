@@ -5,20 +5,23 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { WsException } from '@nestjs/websockets';
+import { Socket } from 'socket.io';
 
 @Catch()
 export class WsGlobalExceptionFilter implements WsExceptionFilter {
-  catch(exception: any, host: ArgumentsHost) {
-    const client = host.switchToWs().getClient();
+  catch(exception: Error, host: ArgumentsHost) {
+    const client = host.switchToWs().getClient<Socket>();
 
     let message = 'Internal server error';
-    let status = 'error';
-    let payload = {};
+    const status = 'error';
+    let payload: Record<string, unknown> = {};
 
     if (exception instanceof BadRequestException) {
       const res = exception.getResponse();
-      message = res['message'] || message;
-      payload = res;
+      if (typeof res === 'object' && res !== null) {
+        payload = res as Record<string, unknown>;
+        message = (payload.message as string) || message;
+      }
     } else if (exception instanceof WsException) {
       message = exception.message;
     }

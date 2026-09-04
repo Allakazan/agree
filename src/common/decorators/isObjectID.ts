@@ -5,7 +5,7 @@ import {
 } from 'class-validator';
 
 export function IsObjectID(validationOptions?: ValidationOptions) {
-  return function (object: Object, propertyName: string) {
+  return function (object: object, propertyName: string) {
     registerDecorator({
       name: 'IsObjectID',
       target: object.constructor,

@@ -12,7 +12,7 @@ export const DRIZZLE = Symbol('drizzle-connection');
     {
       provide: DRIZZLE,
       inject: [ConfigService],
-      useFactory: async (configSvc: ConfigService) => {
+      useFactory: (configSvc: ConfigService) => {
         const pool = new Pool({
           connectionString: configSvc.get<string>('database.postgresql.url'),
           //ssl: true,
