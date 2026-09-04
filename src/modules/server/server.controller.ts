@@ -23,7 +23,7 @@ export class ServerController {
   ) {
     try {
       console.log(user);
-      return this.serverService.create(createServerDto);
+      return await this.serverService.create(createServerDto);
     } catch (error) {
       throw new BadRequestException(error);
     }
