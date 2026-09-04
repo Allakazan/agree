@@ -7,7 +7,9 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { WsException } from '@nestjs/websockets';
 import { Request } from 'express';
+import { Socket } from 'socket.io';
 import { LoggedUser } from '../types/loggedUser.type';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/ispublic.decorator';
@@ -28,20 +30,37 @@ export class AuthGuard implements CanActivate {
 
     if (isPublic) return true;
 
-    const request = context.switchToHttp().getRequest();
-    const token = this.extractTokenFromHeader(request);
+    const isWs = context.getType() === 'ws';
+
+    const token = isWs
+      ? this.extractTokenFromSocket(context.switchToWs().getClient())
+      : this.extractTokenFromHeader(context.switchToHttp().getRequest());
+
     if (!token) {
-      throw new UnauthorizedException();
+      throw isWs
+        ? new WsException('Unauthorized')
+        : new UnauthorizedException();
     }
+
     try {
       const payload = await this.jwtService.verifyAsync(token, {
         secret: this.configService.get<string>('auth.secret'),
       });
-      // 💡 We're assigning the payload to the request object here
-      // so that we can access it in our route handlers
-      request['user'] = payload as LoggedUser;
+
+      if (isWs) {
+        // 💡 We're assigning the payload to the socket's data object here
+        // so that we can access it in our gateway handlers via @User()
+        context.switchToWs().getClient<Socket>().data.user =
+          payload as LoggedUser;
+      } else {
+        // 💡 We're assigning the payload to the request object here
+        // so that we can access it in our route handlers
+        context.switchToHttp().getRequest()['user'] = payload as LoggedUser;
+      }
     } catch {
-      throw new UnauthorizedException();
+      throw isWs
+        ? new WsException('Unauthorized')
+        : new UnauthorizedException();
     }
     return true;
   }
@@ -49,5 +68,14 @@ export class AuthGuard implements CanActivate {
   private extractTokenFromHeader(request: Request): string | undefined {
     const [type, token] = request.headers.authorization?.split(' ') ?? [];
     return type === 'Bearer' ? token : undefined;
+  }
+
+  private extractTokenFromSocket(client: Socket): string | undefined {
+    const [type, headerToken] =
+      client.handshake.headers.authorization?.split(' ') ?? [];
+    if (type === 'Bearer' && headerToken) return headerToken;
+
+    const authToken = client.handshake.auth?.token;
+    return typeof authToken === 'string' ? authToken : undefined;
   }
 }

@@ -4,15 +4,14 @@ import {
   Get,
   HttpCode,
   HttpStatus,
-  Request,
   Post,
-  UseGuards,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { SignInDto } from './dto/signin.dto';
-import { AuthGuard } from './guards/auth.guard';
 import { ApiBearerAuth } from '@nestjs/swagger';
 import { Public } from './decorators/ispublic.decorator';
+import { User } from './decorators/user.decorator';
+import { LoggedUser } from './types/loggedUser.type';
 
 @Controller('auth')
 @ApiBearerAuth()
@@ -26,10 +25,8 @@ export class AuthController {
     return this.authService.signIn(login, password);
   }
 
-  @Public()
   @Get('profile')
-  getProfile(@Request() req) {
-    console.log(req.user);
-    return req.user;
+  getProfile(@User() user: LoggedUser) {
+    return user;
   }
 }

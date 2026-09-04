@@ -16,9 +16,9 @@ import { WsValidationPipe } from 'src/common/pipes/ws-validation.pipe';
 import { WsGlobalExceptionFilter } from 'src/common/filters/ws-exception.filter';
 import { DRIZZLE } from 'src/drizzle/drizzle.module';
 import { DrizzleDB } from 'src/drizzle/types/drizzle';
-import { conversations, messages } from 'src/drizzle/schema';
-import { sql } from 'drizzle-orm';
 import { ChatService } from './chat.service';
+import { User } from 'src/modules/auth/decorators/user.decorator';
+import { LoggedUser } from 'src/modules/auth/types/loggedUser.type';
 
 @WebSocketGateway(4040, {
   namespace: 'chat',
@@ -41,9 +41,14 @@ export class ChatGateway {
   @UsePipes(new WsValidationPipe())
   async handleEvent(
     @MessageBody() { message, channelId }: ChatMessageDto,
+    @User() user: LoggedUser,
   ): Promise<any> {
     try {
-      await this.chatService.createMessagesAndConversation(channelId, message);
+      await this.chatService.createMessagesAndConversation(
+        channelId,
+        message,
+        user.sub,
+      );
 
       this.server.emit(`channel:${channelId}:messages`, message);
 
@@ -51,7 +56,8 @@ export class ChatGateway {
     } catch (error) {
       console.error(error);
       throw new BadRequestException(
-        error.message || 'Error at the message socket',
+        (error instanceof Error && error.message) ||
+          'Error at the message socket',
       );
     }
   }

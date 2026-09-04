@@ -12,6 +12,7 @@ export class ChatService {
   async createMessagesAndConversation(
     channelId: string,
     message: string,
+    senderId: string,
   ): Promise<InferSelectModel<typeof messages>> {
     const [upserted] = await this.drizzleService
       .insert(conversations)
@@ -29,7 +30,7 @@ export class ChatService {
       .insert(messages)
       .values({
         conversationId: upserted.id,
-        senderId: 'user_123',
+        senderId,
         senderUsername: '',
         senderAvatarUrl: '',
         content: message,
