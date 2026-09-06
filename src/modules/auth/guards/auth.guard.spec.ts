@@ -163,5 +163,24 @@ describe('AuthGuard', () => {
       });
       expect(client.data.user).toEqual(payload);
     });
+
+    it('falls back to the agree_token cookie when there is no header or auth token', async () => {
+      const payload = { sub: 'user-id', username: 'bruno' };
+      jwtService.verifyAsync.mockResolvedValue(payload);
+      const client: { handshake: object; data: { user?: unknown } } = {
+        handshake: {
+          headers: { cookie: 'other=1; agree_token=cookie-token; foo=bar' },
+          auth: {},
+        },
+        data: {},
+      };
+      const context = wsContext(client);
+
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+      expect(jwtService.verifyAsync).toHaveBeenCalledWith('cookie-token', {
+        secret: 'secret',
+      });
+      expect(client.data.user).toEqual(payload);
+    });
   });
 });

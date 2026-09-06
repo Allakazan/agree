@@ -83,6 +83,24 @@ export class AuthGuard implements CanActivate {
     if (type === 'Bearer' && headerToken) return headerToken;
 
     const authToken: unknown = client.handshake.auth?.token;
-    return typeof authToken === 'string' ? authToken : undefined;
+    if (typeof authToken === 'string') return authToken;
+
+    // agree-app sends the JWT as an httpOnly cookie — the browser attaches
+    // it to the WS handshake automatically, so we read it here instead of
+    // relying on JS to pass it in `auth`.
+    return this.extractTokenFromCookieHeader(client.handshake.headers.cookie);
+  }
+
+  private extractTokenFromCookieHeader(
+    cookieHeader: string | undefined,
+  ): string | undefined {
+    const match = cookieHeader
+      ?.split(';')
+      .map((pair) => pair.trim())
+      .find((pair) => pair.startsWith('agree_token='));
+
+    return match
+      ? decodeURIComponent(match.slice('agree_token='.length))
+      : undefined;
   }
 }
