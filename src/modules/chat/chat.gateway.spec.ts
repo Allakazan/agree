@@ -36,9 +36,12 @@ describe('ChatGateway', () => {
     jest.restoreAllMocks();
   });
 
-  it('persists the message and broadcasts it to the channel room', async () => {
+  it('persists the message and broadcasts the full row to the channel room', async () => {
+    const createdAt = new Date('2025-08-10T18:00:00.000Z');
     chatService.createMessagesAndConversation.mockResolvedValue({
       id: 'message-id',
+      content: 'hello',
+      createdAt,
     });
 
     const result = await gateway.handleEvent(
@@ -50,9 +53,18 @@ describe('ChatGateway', () => {
       'channel-id',
       'hello',
       'user-id',
+      'bruno',
     );
-    expect(emit).toHaveBeenCalledWith('channel:channel-id:messages', 'hello');
-    expect(result).toBe(true);
+    expect(emit).toHaveBeenCalledWith('channel:channel-id:messages', {
+      id: 'message-id',
+      content: 'hello',
+      createdAt: createdAt.toISOString(),
+    });
+    expect(result).toEqual({
+      id: 'message-id',
+      content: 'hello',
+      createdAt,
+    });
   });
 
   it('throws a BadRequestException with the underlying error message on failure', async () => {

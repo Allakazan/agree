@@ -50,15 +50,19 @@ export class ChatGateway {
     @User() user: LoggedUser,
   ): Promise<any> {
     try {
-      await this.chatService.createMessagesAndConversation(
+      const inserted = await this.chatService.createMessagesAndConversation(
         channelId,
         message,
         user.sub,
+        user.username,
       );
 
-      this.server.emit(`channel:${channelId}:messages`, message);
+      this.server.emit(`channel:${channelId}:messages`, {
+        ...inserted,
+        createdAt: inserted.createdAt?.toISOString(),
+      });
 
-      return true;
+      return inserted;
     } catch (error) {
       console.error(error);
       throw new BadRequestException(

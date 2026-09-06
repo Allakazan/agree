@@ -13,6 +13,7 @@ export class ChatService {
     channelId: string,
     message: string,
     senderId: string,
+    senderUsername: string,
   ): Promise<InferSelectModel<typeof messages>> {
     const [upserted] = await this.drizzleService
       .insert(conversations)
@@ -31,7 +32,7 @@ export class ChatService {
       .values({
         conversationId: upserted.id,
         senderId,
-        senderUsername: '',
+        senderUsername,
         senderAvatarUrl: '',
         content: message,
         createdAt: new Date(), // Force UTC time

@@ -67,6 +67,7 @@ describe('ChatService', () => {
         'channel-id',
         'hello',
         'user-id',
+        'bruno',
       );
 
       expect(drizzle.insert).toHaveBeenCalledTimes(2);
@@ -79,6 +80,7 @@ describe('ChatService', () => {
         expect.objectContaining({
           conversationId: 'convo-id',
           senderId: 'user-id',
+          senderUsername: 'bruno',
           content: 'hello',
         }),
       );
