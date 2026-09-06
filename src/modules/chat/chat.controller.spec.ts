@@ -4,10 +4,10 @@ import { ChatService } from './chat.service';
 
 describe('ChatController', () => {
   let controller: ChatController;
-  let chatService: { findAll: jest.Mock };
+  let chatService: { findAllByChannel: jest.Mock };
 
   beforeEach(async () => {
-    chatService = { findAll: jest.fn() };
+    chatService = { findAllByChannel: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ChatController],
@@ -17,13 +17,13 @@ describe('ChatController', () => {
     controller = module.get<ChatController>(ChatController);
   });
 
-  it('delegates to ChatService.findAll with the conversation id and query', async () => {
+  it('delegates to ChatService.findAllByChannel with the channel id and query', async () => {
     const messages = [{ id: 'message-id', content: 'hello' }];
-    chatService.findAll.mockResolvedValue(messages);
+    chatService.findAllByChannel.mockResolvedValue(messages);
 
-    const result = await controller.find('convo-id', { limit: 20 });
+    const result = await controller.find('channel-id', { limit: 20 });
 
-    expect(chatService.findAll).toHaveBeenCalledWith('convo-id', {
+    expect(chatService.findAllByChannel).toHaveBeenCalledWith('channel-id', {
       limit: 20,
     });
     expect(result).toBe(messages);

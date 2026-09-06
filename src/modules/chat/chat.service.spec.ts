@@ -124,4 +124,37 @@ describe('ChatService', () => {
       expect(drizzle.where).toHaveBeenCalled();
     });
   });
+
+  describe('findAllByChannel', () => {
+    it('resolves the conversation by channelId then delegates to findAll', async () => {
+      const createdAt = new Date('2025-08-10T18:00:00.000Z');
+      drizzle.limit
+        .mockResolvedValueOnce([{ id: 'convo-id' }])
+        .mockResolvedValueOnce([
+          { id: 'message-id', conversationId: 'convo-id', createdAt },
+        ]);
+
+      const result = await service.findAllByChannel('channel-id', {
+        limit: 20,
+      });
+
+      expect(result).toEqual([
+        {
+          id: 'message-id',
+          conversationId: 'convo-id',
+          createdAt: createdAt.toISOString(),
+        },
+      ]);
+    });
+
+    it('returns an empty array when the channel has no conversation yet', async () => {
+      drizzle.limit.mockResolvedValueOnce([]);
+
+      const result = await service.findAllByChannel('channel-id', {
+        limit: 20,
+      });
+
+      expect(result).toEqual([]);
+    });
+  });
 });

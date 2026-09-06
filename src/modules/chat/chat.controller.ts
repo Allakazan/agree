@@ -8,11 +8,11 @@ import { ApiBearerAuth } from '@nestjs/swagger';
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
-  @Get('/:conversationId')
+  @Get('/:channelId')
   async find(
-    @Param('conversationId') id: string,
+    @Param('channelId') channelId: string,
     @Query() query: ListAllMessages,
   ) {
-    return this.chatService.findAll(id, query);
+    return this.chatService.findAllByChannel(channelId, query);
   }
 }

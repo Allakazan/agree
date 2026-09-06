@@ -42,6 +42,20 @@ export class ChatService {
     return insertedMessage;
   }
 
+  // Client only ever knows the Mongo channelId (relatedMongoChannelId) —
+  // resolve it to the internal conversation before reading messages.
+  async findAllByChannel(channelId: string, params: ListAllMessages) {
+    const [conversation] = await this.drizzleService
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(eq(conversations.relatedMongoChannelId, channelId))
+      .limit(1);
+
+    if (!conversation) return [];
+
+    return this.findAll(conversation.id, params);
+  }
+
   async findAll(conversationId: string, { limit, before }: ListAllMessages) {
     const rows = await this.drizzleService
       .select()
