@@ -10,6 +10,7 @@ import {
   BadRequestException,
   Inject,
   UseFilters,
+  UseGuards,
   UsePipes,
 } from '@nestjs/common';
 import { WsValidationPipe } from 'src/common/pipes/ws-validation.pipe';
@@ -19,15 +20,20 @@ import { DrizzleDB } from 'src/drizzle/types/drizzle';
 import { ChatService } from './chat.service';
 import { User } from 'src/modules/auth/decorators/user.decorator';
 import { LoggedUser } from 'src/modules/auth/types/loggedUser.type';
+import { AuthGuard } from 'src/modules/auth/guards/auth.guard';
 
 @WebSocketGateway(4040, {
   namespace: 'chat',
   cors: {
-    origin: 'http://127.0.0.1:5500', // ou '*', mas cuidado em produção
+    origin: process.env.ORIGIN
+      ? process.env.ORIGIN.split(',')
+      : ['http://localhost:3001', 'http://127.0.0.1:5500'], // agree-app (Next.js) + socket_debug.html defaults
     methods: ['GET', 'POST'],
+    credentials: true,
   },
 })
 @UseFilters(new WsGlobalExceptionFilter())
+@UseGuards(AuthGuard)
 export class ChatGateway {
   constructor(
     @Inject(DRIZZLE) private readonly drizzleService: DrizzleDB,

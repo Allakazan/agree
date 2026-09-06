@@ -4,6 +4,7 @@ import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
 import { DRIZZLE } from 'src/drizzle/drizzle.module';
 import { LoggedUser } from 'src/modules/auth/types/loggedUser.type';
+import { AuthGuard } from 'src/modules/auth/guards/auth.guard';
 
 describe('ChatGateway', () => {
   let gateway: ChatGateway;
@@ -20,7 +21,10 @@ describe('ChatGateway', () => {
         { provide: ChatService, useValue: chatService },
         { provide: DRIZZLE, useValue: {} },
       ],
-    }).compile();
+    })
+      .overrideGuard(AuthGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     gateway = module.get<ChatGateway>(ChatGateway);
     emit = jest.fn();
