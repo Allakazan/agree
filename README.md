@@ -1,98 +1,129 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+<p align="center">Backend do <strong>Agree</strong> — API NestJS com chat em tempo real via WebSocket.</p>
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+## Descrição
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Serviço backend construído com [NestJS](https://nestjs.com/), combinando dois bancos de dados:
 
-## Description
+- **MongoDB** (via Mongoose) — usuários e servidores (`server`).
+- **PostgreSQL** (via [Drizzle ORM](https://orm.drizzle.team/)) — conversas e mensagens do chat.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+A comunicação de chat em tempo real é feita via **Socket.IO** (`@nestjs/websockets`), autenticação via **JWT**, e a documentação da API é gerada com **Swagger**.
 
-## Project setup
+## Requisitos
+
+- Node.js 20+ (o repo foi validado com Node 24 via `nvm`)
+- Yarn
+- Docker + Docker Compose (para subir Postgres, MongoDB e Redis localmente)
+
+## Configuração do ambiente
+
+1. Copie o arquivo de exemplo e ajuste os valores conforme necessário:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Variáveis de ambiente usadas pela aplicação:
+
+   | Variável       | Descrição                                                    | Default (docker-compose)                                     |
+   | -------------- | ------------------------------------------------------------- | -------------------------------------------------------------- |
+   | `PORT`         | Porta HTTP da API                                              | `3000`                                                          |
+   | `DATABASE_URL` | Connection string do PostgreSQL (usado pelo Drizzle)           | `postgresql://nestuser:nestpass@localhost:5432/nestapp`         |
+   | `MONGODB_URI`  | Connection string do MongoDB (usado pelo Mongoose)             | `mongodb://root:1234@localhost:27017/agree?authSource=admin`    |
+   | `JWT_SECRET`   | Segredo para assinar/validar os tokens JWT de autenticação     | *(defina um valor forte, ex.: `openssl rand -hex 32`)*          |
+
+   > O WebSocket do chat (`ChatGateway`) escuta na porta fixa `4040` (não configurável via `.env` atualmente) e o CORS dele libera `http://localhost:3001` (o [agree-app](../agree-app)) e `http://127.0.0.1:5500` (`socket_debug.html`) — ver `src/modules/chat/chat.gateway.ts`.
+   >
+   > O JWT expira em **7 dias** (`auth.module.ts`, `expiresIn: '7d'` — originalmente estava em 60s, aumentado a pedido para uso diário) e não há endpoint de refresh.
+
+## Subindo a infraestrutura (Docker)
 
 ```bash
-$ yarn install
+docker compose up -d
 ```
 
-## Compile and run the project
+Isso sobe três serviços:
+
+| Serviço    | Container      | Porta  | Observação                                   |
+| ---------- | -------------- | ------ | --------------------------------------------- |
+| PostgreSQL | `nest_postgres`| 5432   | database `nestapp`, user `nestuser`            |
+| MongoDB    | `nest_mongo`   | 27017  | database `agree`, root user `root`             |
+| Redis      | `nest_redis`   | 6379   | subido, mas não é usado por nenhum módulo hoje |
+
+## Instalação de dependências
 
 ```bash
-# development
-$ yarn run start
+yarn install
+```
+
+## Migrações do banco (PostgreSQL / Drizzle)
+
+O schema do Drizzle fica em `src/drizzle/schema.ts` e as migrações já geradas em `drizzle/`. Com o Postgres rodando e o `.env` configurado, aplique as migrações:
+
+```bash
+npx drizzle-kit migrate
+```
+
+Outros comandos úteis do Drizzle Kit:
+
+```bash
+npx drizzle-kit generate   # gera uma nova migration a partir de alterações no schema.ts
+npx drizzle-kit studio     # abre o Drizzle Studio para inspecionar o banco
+```
+
+## Seed do MongoDB (opcional)
+
+Popula o MongoDB com servidores e usuários fake (via `@faker-js/faker`), incluindo um usuário fixo `admin@example.com` / `admin123`:
+
+```bash
+yarn mongodb:seed
+```
+
+## Rodando a aplicação
+
+```bash
+# desenvolvimento
+yarn start
 
 # watch mode
-$ yarn run start:dev
+yarn start:dev
 
-# production mode
-$ yarn run start:prod
+# debug
+yarn start:debug
+
+# produção (requer yarn build antes)
+yarn build
+yarn start:prod
 ```
 
-## Run tests
+A API sobe em `http://localhost:3000` (ou na porta definida em `PORT`). A documentação Swagger fica disponível em `http://localhost:3000/api`.
+
+## Testes
 
 ```bash
-# unit tests
-$ yarn run test
-
-# e2e tests
-$ yarn run test:e2e
-
-# test coverage
-$ yarn run test:cov
+yarn test        # unitários
+yarn test:e2e     # end-to-end
+yarn test:cov     # cobertura
 ```
 
-## Deployment
+## Estrutura de módulos
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+- `modules/auth` — login (`POST /auth/login`) e perfil autenticado (`GET /auth/profile`), guard JWT global (rotas marcadas com `@Public()` não exigem token).
+- `modules/users` — acesso a usuários (MongoDB), usado internamente pelo `auth`.
+- `modules/server` — CRUD básico de "servers" (MongoDB): `POST /server`, `GET /server`.
+- `modules/chat` — histórico de mensagens via REST (`GET /chat/:channelId`, resolve a conversa internamente pelo `relatedMongoChannelId`) e envio em tempo real via WebSocket (evento `chat` no namespace `/chat`, porta `4040`, protegido por `AuthGuard`).
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+## Notas de diagnóstico deste setup
 
-```bash
-$ yarn install -g @nestjs/mau
-$ mau deploy
-```
+- Não havia `.env` no repositório; foi criado a partir dos valores default do `docker-compose.yml` (Postgres, Mongo) e um `JWT_SECRET` de desenvolvimento — **troque o `JWT_SECRET` antes de usar em produção**.
+- As migrações do Drizzle (pasta `drizzle/`) não estavam aplicadas no Postgres; foram aplicadas com `npx drizzle-kit migrate`. Não havia script `migrate` no `package.json` — rode o comando manualmente quando o schema mudar.
+- O serviço `redis` do `docker-compose.yml` sobe normalmente, mas não há nenhuma integração com Redis no código atual (pode ser infraestrutura para uso futuro).
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## Mudanças feitas para o [agree-app](../agree-app) (frontend Next.js) conseguir conectar de verdade
 
-## Resources
+1. **CORS do WebSocket** liberado para `http://localhost:3001`, além da origem antiga do `socket_debug.html`.
+2. **`GET /chat/:conversationId` → `GET /chat/:channelId`**: a rota antiga exigia o UUID interno do Postgres, que nenhum endpoint expunha — agora ela recebe o `channelId` do Mongo (mesmo ID usado no evento WS) e resolve a conversa internamente via `ChatService.findAllByChannel`.
+3. **Bug de autenticação corrigido no `ChatGateway`**: o guard global de JWT (`APP_GUARD`, registrado em `AuthModule`) não estava sendo aplicado aos handlers do gateway WS — `@User()` chegava `undefined` e qualquer mensagem enviada quebrava com `Cannot read properties of undefined (reading 'sub')`, mesmo com um token válido. Corrigido com `@UseGuards(AuthGuard)` explícito no `ChatGateway` (e `AuthGuard` registrado como provider em `ChatModule`, já que não estava disponível fora do `AuthModule`). **Isso não é uma mudança de escopo do frontend — era um bug pré-existente que impedia o chat em tempo real de funcionar de qualquer cliente real**, não só do Next.
+4. O gateway agora transmite a **mensagem completa** (`id`, `senderUsername`, `createdAt`, etc.) no evento `channel:<id>:messages`, em vez de só a string do texto.
 
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Os 49 testes (`yarn jest`) continuam passando após essas mudanças; `chat.gateway.spec.ts` precisou de `overrideGuard(AuthGuard)` para compilar o módulo de teste isolado.
