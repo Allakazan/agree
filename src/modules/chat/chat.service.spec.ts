@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ChatService } from './chat.service';
 import { DRIZZLE } from 'src/drizzle/drizzle.module';
 import { UsersService } from '../users/users.service';
@@ -88,6 +92,7 @@ describe('ChatService', () => {
       expect(drizzle.values).toHaveBeenNthCalledWith(1, {
         type: 'channel',
         relatedMongoChannelId: '507f1f77bcf86cd799439011',
+        lastMessageAt: expect.any(Date) as Date,
       });
       expect(drizzle.values).toHaveBeenNthCalledWith(
         2,
@@ -110,6 +115,28 @@ describe('ChatService', () => {
         recipients: [],
       });
     });
+  });
+
+  it('stamps the conversation lastMessageAt with the exact message createdAt', async () => {
+    drizzle.returning
+      .mockResolvedValueOnce([{ id: 'convo-id' }])
+      .mockResolvedValueOnce([{ id: 'message-id' }]);
+
+    await service.createMessagesAndConversation(
+      { message: 'hello', channelId: '507f1f77bcf86cd799439011' },
+      'user-id',
+      'bruno',
+    );
+
+    const [conversationValues] = drizzle.values.mock.calls[0] as unknown as [
+      { lastMessageAt: Date },
+    ];
+    const [messageValues] = drizzle.values.mock.calls[1] as unknown as [
+      { createdAt: Date },
+    ];
+
+    // The denormalized column must never drift from the newest message.
+    expect(conversationValues.lastMessageAt).toBe(messageValues.createdAt);
   });
 
   describe('createMessagesAndConversation - DM path', () => {
@@ -156,6 +183,7 @@ describe('ChatService', () => {
         type: 'dm',
         participants: ['other-id', 'user-id'],
         dmKey: 'other-id:user-id',
+        lastMessageAt: expect.any(Date) as Date,
       });
       expect(result).toEqual({
         message: {
@@ -259,6 +287,126 @@ describe('ChatService', () => {
       });
 
       expect(drizzle.where).toHaveBeenCalled();
+    });
+  });
+
+  describe('findConversationsForUser', () => {
+    it('returns the caller conversations with participants hydrated from Mongo', async () => {
+      const lastMessageAt = new Date('2025-08-10T18:00:00.000Z');
+      drizzle.limit.mockResolvedValue([
+        {
+          id: 'convo-id',
+          type: 'dm',
+          participantIds: ['other-id', 'user-id'],
+          createdAt: lastMessageAt,
+          lastMessageAt,
+        },
+      ]);
+      usersService.findManyByIds.mockResolvedValue([
+        { _id: 'other-id', username: 'other', profileImageUrl: 'other.png' },
+        { _id: 'user-id', username: 'bruno', profileImageUrl: 'bruno.png' },
+      ]);
+
+      const result = await service.findConversationsForUser('user-id', {
+        limit: 20,
+      });
+
+      expect(usersService.findManyByIds).toHaveBeenCalledWith([
+        'other-id',
+        'user-id',
+      ]);
+      expect(drizzle.limit).toHaveBeenCalledWith(20);
+      expect(result).toEqual([
+        {
+          id: 'convo-id',
+          type: 'dm',
+          createdAt: lastMessageAt,
+          lastMessageAt: lastMessageAt.toISOString(),
+          participants: [
+            { id: 'other-id', username: 'other', profileImageUrl: 'other.png' },
+            { id: 'user-id', username: 'bruno', profileImageUrl: 'bruno.png' },
+          ],
+        },
+      ]);
+    });
+
+    it('falls back to a null-named participant when the user no longer exists', async () => {
+      drizzle.limit.mockResolvedValue([
+        {
+          id: 'convo-id',
+          type: 'dm',
+          participantIds: ['deleted-id'],
+          createdAt: new Date('2025-08-10T18:00:00.000Z'),
+          lastMessageAt: null,
+        },
+      ]);
+      usersService.findManyByIds.mockResolvedValue([]);
+
+      const [conversation] = await service.findConversationsForUser('user-id', {
+        limit: 20,
+      });
+
+      expect(conversation.lastMessageAt).toBeNull();
+      expect(conversation.participants).toEqual([
+        { id: 'deleted-id', username: null, profileImageUrl: null },
+      ]);
+    });
+  });
+
+  describe('findAllByConversation', () => {
+    it('throws NotFoundException when the conversation does not exist', async () => {
+      drizzle.limit.mockResolvedValueOnce([]);
+
+      await expect(
+        service.findAllByConversation('convo-id', 'user-id', { limit: 20 }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ForbiddenException when the caller is not a participant', async () => {
+      drizzle.limit.mockResolvedValueOnce([
+        { id: 'convo-id', participants: ['other-id'] },
+      ]);
+
+      await expect(
+        service.findAllByConversation('convo-id', 'user-id', { limit: 20 }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    // Channel rows have a null participants list, so this route can never be
+    // used to read a channel's history.
+    it('throws ForbiddenException for a channel conversation', async () => {
+      drizzle.limit.mockResolvedValueOnce([
+        { id: 'convo-id', participants: null },
+      ]);
+
+      await expect(
+        service.findAllByConversation('convo-id', 'user-id', { limit: 20 }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('returns the messages when the caller is a participant', async () => {
+      const createdAt = new Date('2025-08-10T18:00:00.000Z');
+      drizzle.limit
+        .mockResolvedValueOnce([
+          { id: 'convo-id', participants: ['other-id', 'user-id'] },
+        ])
+        .mockResolvedValueOnce([
+          { id: 'message-id', conversationId: 'convo-id', createdAt },
+        ]);
+
+      const result = await service.findAllByConversation(
+        'convo-id',
+        'user-id',
+        { limit: 20 },
+      );
+
+      expect(result).toEqual([
+        {
+          id: 'message-id',
+          conversationId: 'convo-id',
+          createdAt: createdAt.toISOString(),
+        },
+      ]);
     });
   });
 

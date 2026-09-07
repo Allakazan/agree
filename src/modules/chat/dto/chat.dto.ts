@@ -11,6 +11,7 @@ import {
   ArrayMinSize,
   ValidateIf,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { IsObjectID } from 'src/common/decorators/isObjectID';
 import { IsExactlyOneOf } from 'src/common/decorators/isExactlyOneOf';
 
@@ -47,11 +48,13 @@ export class ChannelSubscriptionDto {
 }
 
 export class ListAllMessages {
+  @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @IsPositive()
   @Max(50)
-  @ApiProperty({ example: 20 })
-  limit: number;
+  @ApiPropertyOptional({ example: 20, default: 20 })
+  limit: number = 20;
 
   @IsOptional()
   @IsString()
