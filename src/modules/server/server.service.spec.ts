@@ -1,15 +1,21 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
+import { NotFoundException } from '@nestjs/common';
 import { ServerService } from './server.service';
 import { Server } from './schemas/server.schema';
+import { ChannelType } from './schemas/channel.schema';
 import { CreateServerDto } from './dto/create-server.dto';
+import { CreateChannelDto } from './dto/create-channel.dto';
 import { UsersService } from '../users/users.service';
 
 describe('ServerService', () => {
   let service: ServerService;
   let saveMock: jest.Mock;
   let findMock: jest.Mock;
-  let usersService: { addServerId: jest.Mock };
+  let findByIdAndUpdateMock: jest.Mock;
+  let findByIdMock: jest.Mock;
+  let findOneMock: jest.Mock;
+  let usersService: { addServerId: jest.Mock; isMemberOfServer: jest.Mock };
 
   class MockServerModel {
     constructor(public data: CreateServerDto) {}
@@ -17,12 +23,19 @@ describe('ServerService', () => {
       return saveMock(this.data);
     }
     static find = (...args: unknown[]) => findMock(...args);
+    static findByIdAndUpdate = (...args: unknown[]) =>
+      findByIdAndUpdateMock(...args);
+    static findById = (...args: unknown[]) => findByIdMock(...args);
+    static findOne = (...args: unknown[]) => findOneMock(...args);
   }
 
   beforeEach(async () => {
     saveMock = jest.fn();
     findMock = jest.fn();
-    usersService = { addServerId: jest.fn() };
+    findByIdAndUpdateMock = jest.fn();
+    findByIdMock = jest.fn();
+    findOneMock = jest.fn();
+    usersService = { addServerId: jest.fn(), isMemberOfServer: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -72,6 +85,102 @@ describe('ServerService', () => {
       expect(findMock).toHaveBeenCalled();
       expect(exec).toHaveBeenCalled();
       expect(result).toBe(servers);
+    });
+  });
+
+  describe('createChannel', () => {
+    const dto: CreateChannelDto = { name: 'general', type: ChannelType.TEXT };
+
+    it('pushes the channel and returns the newly created subdocument', async () => {
+      const newChannel = { _id: 'channel-id', ...dto };
+      const exec = jest.fn().mockResolvedValue({ channels: [newChannel] });
+      findByIdAndUpdateMock.mockReturnValue({ exec });
+
+      const result = await service.createChannel('server-id', dto);
+
+      expect(findByIdAndUpdateMock).toHaveBeenCalledWith(
+        'server-id',
+        { $push: { channels: dto } },
+        { new: true, runValidators: true },
+      );
+      expect(result).toBe(newChannel);
+    });
+
+    it('throws NotFoundException when the server does not exist', async () => {
+      const exec = jest.fn().mockResolvedValue(null);
+      findByIdAndUpdateMock.mockReturnValue({ exec });
+
+      await expect(service.createChannel('server-id', dto)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('findChannelsByServer', () => {
+    it('returns the channels array projected from the server', async () => {
+      const channels = [{ _id: 'channel-id', name: 'general', type: 'text' }];
+      const exec = jest.fn().mockResolvedValue({ channels });
+      findByIdMock.mockReturnValue({ exec });
+
+      const result = await service.findChannelsByServer('server-id');
+
+      expect(findByIdMock).toHaveBeenCalledWith('server-id', { channels: 1 });
+      expect(result).toBe(channels);
+    });
+
+    it('throws NotFoundException when the server does not exist', async () => {
+      const exec = jest.fn().mockResolvedValue(null);
+      findByIdMock.mockReturnValue({ exec });
+
+      await expect(service.findChannelsByServer('server-id')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('isUserMemberOfChannelServer', () => {
+    const validChannelId = '507f1f77bcf86cd799439011';
+
+    it('returns false without querying when the channelId is malformed', async () => {
+      const result = await service.isUserMemberOfChannelServer(
+        'user-id',
+        'not-an-id',
+      );
+
+      expect(result).toBe(false);
+      expect(findOneMock).not.toHaveBeenCalled();
+    });
+
+    it('returns false when no server contains the channel', async () => {
+      const exec = jest.fn().mockResolvedValue(null);
+      findOneMock.mockReturnValue({ exec });
+
+      const result = await service.isUserMemberOfChannelServer(
+        'user-id',
+        validChannelId,
+      );
+
+      expect(result).toBe(false);
+      expect(usersService.isMemberOfServer).not.toHaveBeenCalled();
+    });
+
+    it('delegates to usersService.isMemberOfServer with the owning server id', async () => {
+      const exec = jest
+        .fn()
+        .mockResolvedValue({ _id: { toString: () => 'server-id' } });
+      findOneMock.mockReturnValue({ exec });
+      usersService.isMemberOfServer.mockResolvedValue(true);
+
+      const result = await service.isUserMemberOfChannelServer(
+        'user-id',
+        validChannelId,
+      );
+
+      expect(usersService.isMemberOfServer).toHaveBeenCalledWith(
+        'user-id',
+        'server-id',
+      );
+      expect(result).toBe(true);
     });
   });
 });

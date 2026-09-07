@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import { faker } from '@faker-js/faker';
 import * as argon2 from 'argon2';
 import { ServerSchema } from './modules/server/schemas/server.schema';
+import { ChannelType } from './modules/server/schemas/channel.schema';
 import { UserSchema } from './modules/users/schemas/user.schema';
 
 const DEFAUT_USER = {
@@ -31,6 +32,17 @@ async function seed() {
     description: faker.commerce.productDescription(),
     logoImg: faker.image.avatar(),
     bannerImage: faker.image.urlLoremFlickr({ category: 'abstract' }),
+    channels: [
+      { name: 'general', type: ChannelType.TEXT },
+      { name: 'random', type: ChannelType.TEXT },
+      { name: 'Voice Chat', type: ChannelType.VOICE },
+      ...Array.from({
+        length: faker.number.int({ min: 0, max: 3 }),
+      }).map(() => ({
+        name: faker.word.noun(),
+        type: faker.helpers.arrayElement(Object.values(ChannelType)),
+      })),
+    ],
   }));
 
   const servers = await Server.insertMany(serversData);

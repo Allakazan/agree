@@ -9,14 +9,14 @@ import { DRIZZLE } from 'src/drizzle/drizzle.module';
 import { conversations, messages } from 'src/drizzle/schema';
 import { DrizzleDB } from 'src/drizzle/types/drizzle';
 import { ChatMessageDto, ListAllMessages } from './dto/chat.dto';
-import { ChannelService } from '../channel/channel.service';
+import { ServerService } from '../server/server.service';
 import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class ChatService {
   constructor(
     @Inject(DRIZZLE) private readonly drizzleService: DrizzleDB,
-    private readonly channelService: ChannelService,
+    private readonly serverService: ServerService,
     private readonly usersService: UsersService,
   ) {}
 
@@ -41,7 +41,7 @@ export class ChatService {
     channelId: string,
     senderId: string,
   ): Promise<string> {
-    const isMember = await this.channelService.isUserMemberOfChannelServer(
+    const isMember = await this.serverService.isUserMemberOfChannelServer(
       senderId,
       channelId,
     );

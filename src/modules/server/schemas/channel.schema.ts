@@ -1,16 +1,20 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
+import { HydratedDocument } from 'mongoose';
 
 export type ChannelDocument = HydratedDocument<Channel>;
 
-@Schema()
+export enum ChannelType {
+  TEXT = 'text',
+  VOICE = 'voice',
+}
+
+@Schema({ _id: true })
 export class Channel {
   @Prop({ required: true })
   name: string;
 
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Server', required: true })
-  serverId: Types.ObjectId;
+  @Prop({ type: String, enum: ChannelType, required: true })
+  type: ChannelType;
 }
 
 export const ChannelSchema = SchemaFactory.createForClass(Channel);
-ChannelSchema.index({ serverId: 1 });

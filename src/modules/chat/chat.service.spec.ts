@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ChatService } from './chat.service';
 import { DRIZZLE } from 'src/drizzle/drizzle.module';
-import { ChannelService } from '../channel/channel.service';
+import { ServerService } from '../server/server.service';
 import { UsersService } from '../users/users.service';
 import { ChatMessageDto } from './dto/chat.dto';
 
@@ -19,7 +19,7 @@ describe('ChatService', () => {
     orderBy: jest.Mock;
     limit: jest.Mock;
   };
-  let channelService: { isUserMemberOfChannelServer: jest.Mock };
+  let serverService: { isUserMemberOfChannelServer: jest.Mock };
   let usersService: { findManyByIds: jest.Mock };
 
   beforeEach(async () => {
@@ -48,14 +48,14 @@ describe('ChatService', () => {
       }),
       limit: jest.fn(),
     };
-    channelService = { isUserMemberOfChannelServer: jest.fn() };
+    serverService = { isUserMemberOfChannelServer: jest.fn() };
     usersService = { findManyByIds: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ChatService,
         { provide: DRIZZLE, useValue: drizzle },
-        { provide: ChannelService, useValue: channelService },
+        { provide: ServerService, useValue: serverService },
         { provide: UsersService, useValue: usersService },
       ],
     }).compile();
@@ -65,7 +65,7 @@ describe('ChatService', () => {
 
   describe('createMessagesAndConversation - channel path', () => {
     it('throws ForbiddenException and inserts nothing when the sender is not a member of the channel server', async () => {
-      channelService.isUserMemberOfChannelServer.mockResolvedValue(false);
+      serverService.isUserMemberOfChannelServer.mockResolvedValue(false);
       const dto: ChatMessageDto = {
         message: 'hello',
         channelId: '507f1f77bcf86cd799439011',
@@ -78,7 +78,7 @@ describe('ChatService', () => {
     });
 
     it('upserts the conversation and inserts the message when the sender is a member', async () => {
-      channelService.isUserMemberOfChannelServer.mockResolvedValue(true);
+      serverService.isUserMemberOfChannelServer.mockResolvedValue(true);
       drizzle.returning
         .mockResolvedValueOnce([{ id: 'convo-id' }])
         .mockResolvedValueOnce([

@@ -4,11 +4,11 @@ import { DrizzleModule } from 'src/drizzle/drizzle.module';
 import { ChatService } from './chat.service';
 import { ChatController } from './chat.controller';
 import { AuthGuard } from 'src/modules/auth/guards/auth.guard';
-import { ChannelModule } from '../channel/channel.module';
+import { ServerModule } from '../server/server.module';
 import { UsersModule } from '../users/users.module';
 
 @Module({
-  imports: [DrizzleModule, ChannelModule, UsersModule],
+  imports: [DrizzleModule, ServerModule, UsersModule],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway, AuthGuard],
 })

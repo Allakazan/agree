@@ -3,11 +3,18 @@ import { BadRequestException } from '@nestjs/common';
 import { ServerController } from './server.controller';
 import { ServerService } from './server.service';
 import { CreateServerDto } from './dto/create-server.dto';
+import { CreateChannelDto } from './dto/create-channel.dto';
+import { ChannelType } from './schemas/channel.schema';
 import { LoggedUser } from '../auth/types/loggedUser.type';
 
 describe('ServerController', () => {
   let controller: ServerController;
-  let serverService: { create: jest.Mock; findAll: jest.Mock };
+  let serverService: {
+    create: jest.Mock;
+    findAll: jest.Mock;
+    createChannel: jest.Mock;
+    findChannelsByServer: jest.Mock;
+  };
   const user: LoggedUser = { sub: 'user-id', username: 'bruno' };
   const dto: CreateServerDto = {
     name: 'My Server',
@@ -17,7 +24,12 @@ describe('ServerController', () => {
   };
 
   beforeEach(async () => {
-    serverService = { create: jest.fn(), findAll: jest.fn() };
+    serverService = {
+      create: jest.fn(),
+      findAll: jest.fn(),
+      createChannel: jest.fn(),
+      findChannelsByServer: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ServerController],
@@ -59,6 +71,39 @@ describe('ServerController', () => {
       const result = await controller.find();
 
       expect(result).toBe(servers);
+    });
+  });
+
+  describe('createChannel', () => {
+    it('delegates to ServerService.createChannel and returns the result', async () => {
+      const channelDto: CreateChannelDto = {
+        name: 'general',
+        type: ChannelType.TEXT,
+      };
+      const created = { _id: 'channel-id', ...channelDto };
+      serverService.createChannel.mockResolvedValue(created);
+
+      const result = await controller.createChannel('server-id', channelDto);
+
+      expect(serverService.createChannel).toHaveBeenCalledWith(
+        'server-id',
+        channelDto,
+      );
+      expect(result).toBe(created);
+    });
+  });
+
+  describe('findChannels', () => {
+    it('returns channels from ServerService.findChannelsByServer', async () => {
+      const channels = [{ _id: 'channel-id', name: 'general', type: 'text' }];
+      serverService.findChannelsByServer.mockResolvedValue(channels);
+
+      const result = await controller.findChannels('server-id');
+
+      expect(serverService.findChannelsByServer).toHaveBeenCalledWith(
+        'server-id',
+      );
+      expect(result).toBe(channels);
     });
   });
 });
