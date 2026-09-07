@@ -39,6 +39,13 @@ export class ChatMessageDto {
   recipientIds?: string[];
 }
 
+export class ChannelSubscriptionDto {
+  @IsString()
+  @IsObjectID()
+  @ApiProperty()
+  channelId: string;
+}
+
 export class ListAllMessages {
   @IsNumber()
   @IsPositive()

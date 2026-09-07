@@ -13,6 +13,7 @@ import { Socket } from 'socket.io';
 import { LoggedUser } from '../types/loggedUser.type';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/ispublic.decorator';
+import { extractTokenFromSocket } from '../utils/ws-token';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -33,7 +34,7 @@ export class AuthGuard implements CanActivate {
     const isWs = context.getType() === 'ws';
 
     const token = isWs
-      ? this.extractTokenFromSocket(context.switchToWs().getClient<Socket>())
+      ? extractTokenFromSocket(context.switchToWs().getClient<Socket>())
       : this.extractTokenFromHeader(
           context.switchToHttp().getRequest<Request>(),
         );
@@ -75,32 +76,5 @@ export class AuthGuard implements CanActivate {
   private extractTokenFromHeader(request: Request): string | undefined {
     const [type, token] = request.headers.authorization?.split(' ') ?? [];
     return type === 'Bearer' ? token : undefined;
-  }
-
-  private extractTokenFromSocket(client: Socket): string | undefined {
-    const [type, headerToken] =
-      client.handshake.headers.authorization?.split(' ') ?? [];
-    if (type === 'Bearer' && headerToken) return headerToken;
-
-    const authToken: unknown = client.handshake.auth?.token;
-    if (typeof authToken === 'string') return authToken;
-
-    // agree-app sends the JWT as an httpOnly cookie — the browser attaches
-    // it to the WS handshake automatically, so we read it here instead of
-    // relying on JS to pass it in `auth`.
-    return this.extractTokenFromCookieHeader(client.handshake.headers.cookie);
-  }
-
-  private extractTokenFromCookieHeader(
-    cookieHeader: string | undefined,
-  ): string | undefined {
-    const match = cookieHeader
-      ?.split(';')
-      .map((pair) => pair.trim())
-      .find((pair) => pair.startsWith('agree_token='));
-
-    return match
-      ? decodeURIComponent(match.slice('agree_token='.length))
-      : undefined;
   }
 }

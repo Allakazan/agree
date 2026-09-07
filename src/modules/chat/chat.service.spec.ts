@@ -1,8 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { ChatService } from './chat.service';
 import { DRIZZLE } from 'src/drizzle/drizzle.module';
-import { ServerService } from '../server/server.service';
 import { UsersService } from '../users/users.service';
 import { ChatMessageDto } from './dto/chat.dto';
 
@@ -19,7 +18,6 @@ describe('ChatService', () => {
     orderBy: jest.Mock;
     limit: jest.Mock;
   };
-  let serverService: { isUserMemberOfChannelServer: jest.Mock };
   let usersService: { findManyByIds: jest.Mock };
 
   beforeEach(async () => {
@@ -48,14 +46,12 @@ describe('ChatService', () => {
       }),
       limit: jest.fn(),
     };
-    serverService = { isUserMemberOfChannelServer: jest.fn() };
     usersService = { findManyByIds: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ChatService,
         { provide: DRIZZLE, useValue: drizzle },
-        { provide: ServerService, useValue: serverService },
         { provide: UsersService, useValue: usersService },
       ],
     }).compile();
@@ -63,22 +59,10 @@ describe('ChatService', () => {
     service = module.get<ChatService>(ChatService);
   });
 
+  // Channel membership is enforced by ChatGateway (room membership), not here
+  // — see the note on findOrCreateChannelConversation.
   describe('createMessagesAndConversation - channel path', () => {
-    it('throws ForbiddenException and inserts nothing when the sender is not a member of the channel server', async () => {
-      serverService.isUserMemberOfChannelServer.mockResolvedValue(false);
-      const dto: ChatMessageDto = {
-        message: 'hello',
-        channelId: '507f1f77bcf86cd799439011',
-      };
-
-      await expect(
-        service.createMessagesAndConversation(dto, 'user-id', 'bruno'),
-      ).rejects.toThrow(ForbiddenException);
-      expect(drizzle.insert).not.toHaveBeenCalled();
-    });
-
-    it('upserts the conversation and inserts the message when the sender is a member', async () => {
-      serverService.isUserMemberOfChannelServer.mockResolvedValue(true);
+    it('upserts the conversation and inserts the message', async () => {
       drizzle.returning
         .mockResolvedValueOnce([{ id: 'convo-id' }])
         .mockResolvedValueOnce([
@@ -115,10 +99,15 @@ describe('ChatService', () => {
         }),
       );
       expect(result).toEqual({
-        id: 'message-id',
-        conversationId: 'convo-id',
-        senderId: 'user-id',
-        content: 'hello',
+        message: {
+          id: 'message-id',
+          conversationId: 'convo-id',
+          senderId: 'user-id',
+          content: 'hello',
+        },
+        // Channel messages fan out by channel room, so there is no
+        // participant list to deliver to.
+        recipients: [],
       });
     });
   });
@@ -169,10 +158,15 @@ describe('ChatService', () => {
         dmKey: 'other-id:user-id',
       });
       expect(result).toEqual({
-        id: 'message-id',
-        conversationId: 'convo-id',
-        senderId: 'user-id',
-        content: 'hi',
+        message: {
+          id: 'message-id',
+          conversationId: 'convo-id',
+          senderId: 'user-id',
+          content: 'hi',
+        },
+        // Sorted, and always including the sender — the gateway maps these
+        // straight onto `user:<id>` rooms.
+        recipients: ['other-id', 'user-id'],
       });
     });
 

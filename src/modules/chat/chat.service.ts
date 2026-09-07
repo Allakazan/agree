@@ -1,22 +1,22 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Inject,
-  Injectable,
-} from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { InferSelectModel, sql, eq, and, lt, desc } from 'drizzle-orm';
 import { DRIZZLE } from 'src/drizzle/drizzle.module';
 import { conversations, messages } from 'src/drizzle/schema';
 import { DrizzleDB } from 'src/drizzle/types/drizzle';
 import { ChatMessageDto, ListAllMessages } from './dto/chat.dto';
-import { ServerService } from '../server/server.service';
 import { UsersService } from '../users/users.service';
+
+export type CreatedMessage = {
+  message: InferSelectModel<typeof messages>;
+  // Participants of a dm/group, so the gateway can fan out to their user
+  // rooms. Empty for channel messages — those are delivered by channel room.
+  recipients: string[];
+};
 
 @Injectable()
 export class ChatService {
   constructor(
     @Inject(DRIZZLE) private readonly drizzleService: DrizzleDB,
-    private readonly serverService: ServerService,
     private readonly usersService: UsersService,
   ) {}
 
@@ -24,33 +24,28 @@ export class ChatService {
     dto: ChatMessageDto,
     senderId: string,
     senderUsername: string,
-  ): Promise<InferSelectModel<typeof messages>> {
-    const conversationId = dto.channelId
-      ? await this.findOrCreateChannelConversation(dto.channelId, senderId)
+  ): Promise<CreatedMessage> {
+    const { id: conversationId, participants } = dto.channelId
+      ? await this.findOrCreateChannelConversation(dto.channelId)
       : await this.findOrCreateDirectConversation(dto.recipientIds!, senderId);
 
-    return this.insertMessage(
+    const message = await this.insertMessage(
       conversationId,
       senderId,
       senderUsername,
       dto.message,
     );
+
+    return { message, recipients: participants };
   }
 
+  // Caller-authorized: channel membership is enforced by ChatGateway, which
+  // only lets a socket send to a channel room it has joined (and only lets it
+  // join after ServerService.isUserMemberOfChannelServer passes). Any new
+  // caller — REST, a queue consumer — must do that check itself first.
   private async findOrCreateChannelConversation(
     channelId: string,
-    senderId: string,
-  ): Promise<string> {
-    const isMember = await this.serverService.isUserMemberOfChannelServer(
-      senderId,
-      channelId,
-    );
-    if (!isMember) {
-      throw new ForbiddenException(
-        "You are not a member of this channel's server",
-      );
-    }
-
+  ): Promise<{ id: string; participants: string[] }> {
     const [upserted] = await this.drizzleService
       .insert(conversations)
       .values({ type: 'channel', relatedMongoChannelId: channelId })
@@ -63,13 +58,13 @@ export class ChatService {
       })
       .returning({ id: conversations.id });
 
-    return upserted.id;
+    return { id: upserted.id, participants: [] };
   }
 
   private async findOrCreateDirectConversation(
     recipientIds: string[],
     senderId: string,
-  ): Promise<string> {
+  ): Promise<{ id: string; participants: string[] }> {
     const participantIds = Array.from(new Set([senderId, ...recipientIds]));
 
     const existingUsers = await this.usersService.findManyByIds(participantIds);
@@ -90,7 +85,7 @@ export class ChatService {
       })
       .returning({ id: conversations.id });
 
-    return upserted.id;
+    return { id: upserted.id, participants: sortedParticipants };
   }
 
   private async insertMessage(
