@@ -15,6 +15,13 @@
       "when": 1754009729701,
       "tag": "0001_useful_rhino",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788577092678,
+      "tag": "0002_omniscient_kinsey_walden",
+      "breakpoints": true
     }
   ]
 }

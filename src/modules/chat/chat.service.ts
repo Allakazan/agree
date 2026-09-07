@@ -1,20 +1,56 @@
-import { Inject, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+} from '@nestjs/common';
 import { InferSelectModel, sql, eq, and, lt, desc } from 'drizzle-orm';
 import { DRIZZLE } from 'src/drizzle/drizzle.module';
 import { conversations, messages } from 'src/drizzle/schema';
 import { DrizzleDB } from 'src/drizzle/types/drizzle';
-import { ListAllMessages } from './dto/chat.dto';
+import { ChatMessageDto, ListAllMessages } from './dto/chat.dto';
+import { ChannelService } from '../channel/channel.service';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class ChatService {
-  constructor(@Inject(DRIZZLE) private readonly drizzleService: DrizzleDB) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly drizzleService: DrizzleDB,
+    private readonly channelService: ChannelService,
+    private readonly usersService: UsersService,
+  ) {}
 
   async createMessagesAndConversation(
-    channelId: string,
-    message: string,
+    dto: ChatMessageDto,
     senderId: string,
     senderUsername: string,
   ): Promise<InferSelectModel<typeof messages>> {
+    const conversationId = dto.channelId
+      ? await this.findOrCreateChannelConversation(dto.channelId, senderId)
+      : await this.findOrCreateDirectConversation(dto.recipientIds!, senderId);
+
+    return this.insertMessage(
+      conversationId,
+      senderId,
+      senderUsername,
+      dto.message,
+    );
+  }
+
+  private async findOrCreateChannelConversation(
+    channelId: string,
+    senderId: string,
+  ): Promise<string> {
+    const isMember = await this.channelService.isUserMemberOfChannelServer(
+      senderId,
+      channelId,
+    );
+    if (!isMember) {
+      throw new ForbiddenException(
+        "You are not a member of this channel's server",
+      );
+    }
+
     const [upserted] = await this.drizzleService
       .insert(conversations)
       .values({ type: 'channel', relatedMongoChannelId: channelId })
@@ -27,10 +63,46 @@ export class ChatService {
       })
       .returning({ id: conversations.id });
 
+    return upserted.id;
+  }
+
+  private async findOrCreateDirectConversation(
+    recipientIds: string[],
+    senderId: string,
+  ): Promise<string> {
+    const participantIds = Array.from(new Set([senderId, ...recipientIds]));
+
+    const existingUsers = await this.usersService.findManyByIds(participantIds);
+    if (existingUsers.length !== participantIds.length) {
+      throw new BadRequestException('One or more participants do not exist');
+    }
+
+    const sortedParticipants = [...participantIds].sort();
+    const dmKey = sortedParticipants.join(':');
+    const type = sortedParticipants.length > 2 ? 'group' : 'dm';
+
+    const [upserted] = await this.drizzleService
+      .insert(conversations)
+      .values({ type, participants: sortedParticipants, dmKey })
+      .onConflictDoUpdate({
+        target: conversations.dmKey,
+        set: { dmKey: sql`excluded.dm_key` },
+      })
+      .returning({ id: conversations.id });
+
+    return upserted.id;
+  }
+
+  private async insertMessage(
+    conversationId: string,
+    senderId: string,
+    senderUsername: string,
+    message: string,
+  ): Promise<InferSelectModel<typeof messages>> {
     const [insertedMessage] = await this.drizzleService
       .insert(messages)
       .values({
-        conversationId: upserted.id,
+        conversationId,
         senderId,
         senderUsername,
         senderAvatarUrl: '',

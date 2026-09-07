@@ -22,8 +22,7 @@ export class ServerController {
     @Body() createServerDto: CreateServerDto,
   ) {
     try {
-      console.log(user);
-      return await this.serverService.create(createServerDto);
+      return await this.serverService.create(createServerDto, user.sub);
     } catch (error) {
       throw new BadRequestException(error);
     }

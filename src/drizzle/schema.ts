@@ -22,10 +22,12 @@ export const conversations = pgTable(
     type: conversationTypeEnum('type').notNull(),
     participants: varchar('participants').array(),
     relatedMongoChannelId: varchar('related_mongo_channel_id', { length: 36 }),
+    dmKey: varchar('dm_key'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   },
   (table) => [
     unique('unique_mongo_channel_id').on(table.relatedMongoChannelId),
+    unique('unique_dm_key').on(table.dmKey),
   ],
 );
 

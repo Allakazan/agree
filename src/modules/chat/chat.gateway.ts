@@ -46,21 +46,28 @@ export class ChatGateway {
   @SubscribeMessage('chat')
   @UsePipes(new WsValidationPipe())
   async handleEvent(
-    @MessageBody() { message, channelId }: ChatMessageDto,
+    @MessageBody() dto: ChatMessageDto,
     @User() user: LoggedUser,
   ): Promise<any> {
     try {
       const inserted = await this.chatService.createMessagesAndConversation(
-        channelId,
-        message,
+        dto,
         user.sub,
         user.username,
       );
-
-      this.server.emit(`channel:${channelId}:messages`, {
+      const payload = {
         ...inserted,
         createdAt: inserted.createdAt?.toISOString(),
-      });
+      };
+
+      if (dto.channelId) {
+        this.server.emit(`channel:${dto.channelId}:messages`, payload);
+      } else {
+        this.server.emit(
+          `conversation:${inserted.conversationId}:messages`,
+          payload,
+        );
+      }
 
       return inserted;
     } catch (error) {

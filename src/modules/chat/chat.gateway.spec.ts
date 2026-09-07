@@ -5,6 +5,7 @@ import { ChatService } from './chat.service';
 import { DRIZZLE } from 'src/drizzle/drizzle.module';
 import { LoggedUser } from 'src/modules/auth/types/loggedUser.type';
 import { AuthGuard } from 'src/modules/auth/guards/auth.guard';
+import { ChatMessageDto } from './dto/chat.dto';
 
 describe('ChatGateway', () => {
   let gateway: ChatGateway;
@@ -36,33 +37,67 @@ describe('ChatGateway', () => {
     jest.restoreAllMocks();
   });
 
-  it('persists the message and broadcasts the full row to the channel room', async () => {
+  it('persists a channel message and broadcasts the full row to the channel room', async () => {
     const createdAt = new Date('2025-08-10T18:00:00.000Z');
     chatService.createMessagesAndConversation.mockResolvedValue({
       id: 'message-id',
+      conversationId: 'convo-id',
       content: 'hello',
       createdAt,
     });
+    const dto: ChatMessageDto = { message: 'hello', channelId: 'channel-id' };
 
-    const result = await gateway.handleEvent(
-      { message: 'hello', channelId: 'channel-id' },
-      user,
-    );
+    const result = await gateway.handleEvent(dto, user);
 
     expect(chatService.createMessagesAndConversation).toHaveBeenCalledWith(
-      'channel-id',
-      'hello',
+      dto,
       'user-id',
       'bruno',
     );
     expect(emit).toHaveBeenCalledWith('channel:channel-id:messages', {
       id: 'message-id',
+      conversationId: 'convo-id',
       content: 'hello',
       createdAt: createdAt.toISOString(),
     });
     expect(result).toEqual({
       id: 'message-id',
+      conversationId: 'convo-id',
       content: 'hello',
+      createdAt,
+    });
+  });
+
+  it('persists a DM message and broadcasts the full row to the conversation room', async () => {
+    const createdAt = new Date('2025-08-10T18:00:00.000Z');
+    chatService.createMessagesAndConversation.mockResolvedValue({
+      id: 'message-id',
+      conversationId: 'convo-id',
+      content: 'hi',
+      createdAt,
+    });
+    const dto: ChatMessageDto = {
+      message: 'hi',
+      recipientIds: ['other-id'],
+    };
+
+    const result = await gateway.handleEvent(dto, user);
+
+    expect(chatService.createMessagesAndConversation).toHaveBeenCalledWith(
+      dto,
+      'user-id',
+      'bruno',
+    );
+    expect(emit).toHaveBeenCalledWith('conversation:convo-id:messages', {
+      id: 'message-id',
+      conversationId: 'convo-id',
+      content: 'hi',
+      createdAt: createdAt.toISOString(),
+    });
+    expect(result).toEqual({
+      id: 'message-id',
+      conversationId: 'convo-id',
+      content: 'hi',
       createdAt,
     });
   });
@@ -71,21 +106,23 @@ describe('ChatGateway', () => {
     chatService.createMessagesAndConversation.mockRejectedValue(
       new Error('db unavailable'),
     );
+    const dto: ChatMessageDto = { message: 'hello', channelId: 'channel-id' };
 
-    await expect(
-      gateway.handleEvent({ message: 'hello', channelId: 'channel-id' }, user),
-    ).rejects.toThrow(BadRequestException);
-    await expect(
-      gateway.handleEvent({ message: 'hello', channelId: 'channel-id' }, user),
-    ).rejects.toThrow('db unavailable');
+    await expect(gateway.handleEvent(dto, user)).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(gateway.handleEvent(dto, user)).rejects.toThrow(
+      'db unavailable',
+    );
     expect(emit).not.toHaveBeenCalled();
   });
 
   it('falls back to a generic message when the thrown value is not an Error', async () => {
     chatService.createMessagesAndConversation.mockRejectedValue('boom');
+    const dto: ChatMessageDto = { message: 'hello', channelId: 'channel-id' };
 
-    await expect(
-      gateway.handleEvent({ message: 'hello', channelId: 'channel-id' }, user),
-    ).rejects.toThrow('Error at the message socket');
+    await expect(gateway.handleEvent(dto, user)).rejects.toThrow(
+      'Error at the message socket',
+    );
   });
 });

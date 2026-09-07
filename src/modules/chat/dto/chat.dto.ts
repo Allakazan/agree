@@ -7,19 +7,36 @@ import {
   Max,
   MaxLength,
   IsOptional,
+  IsArray,
+  ArrayMinSize,
+  ValidateIf,
 } from 'class-validator';
 import { IsObjectID } from 'src/common/decorators/isObjectID';
+import { IsExactlyOneOf } from 'src/common/decorators/isExactlyOneOf';
 
 const MESSAGE_MAX_CHARACTERS = 1024;
 
 export class ChatMessageDto {
   @IsString()
   @MaxLength(MESSAGE_MAX_CHARACTERS)
+  // IsExactlyOneOf lives here, not on channelId/recipientIds, because
+  // @ValidateIf on those fields would skip it too when both are sent
+  // (ValidateIf gates every validator on the same property).
+  @IsExactlyOneOf(['channelId', 'recipientIds'])
   message: string;
 
+  @ValidateIf((o: ChatMessageDto) => o.recipientIds === undefined)
   @IsString()
   @IsObjectID()
-  channelId: string;
+  @ApiPropertyOptional()
+  channelId?: string;
+
+  @ValidateIf((o: ChatMessageDto) => o.channelId === undefined)
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsObjectID({ each: true })
+  @ApiPropertyOptional({ type: [String] })
+  recipientIds?: string[];
 }
 
 export class ListAllMessages {

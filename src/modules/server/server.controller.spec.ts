@@ -25,7 +25,6 @@ describe('ServerController', () => {
     }).compile();
 
     controller = module.get<ServerController>(ServerController);
-    jest.spyOn(console, 'log').mockImplementation();
   });
 
   afterEach(() => {
@@ -39,7 +38,7 @@ describe('ServerController', () => {
 
       const result = await controller.create(user, dto);
 
-      expect(serverService.create).toHaveBeenCalledWith(dto);
+      expect(serverService.create).toHaveBeenCalledWith(dto, user.sub);
       expect(result).toBe(created);
     });
 

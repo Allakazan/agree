@@ -10,4 +10,21 @@ export class UsersService {
   async findOne(filter: FilterQuery<User>): Promise<(User & Document) | null> {
     return this.userModel.findOne(filter).exec();
   }
+
+  async addServerId(userId: string, serverId: string): Promise<void> {
+    await this.userModel
+      .updateOne({ _id: userId }, { $addToSet: { serverIds: serverId } })
+      .exec();
+  }
+
+  async isMemberOfServer(userId: string, serverId: string): Promise<boolean> {
+    return (
+      (await this.userModel.exists({ _id: userId, serverIds: serverId })) !==
+      null
+    );
+  }
+
+  async findManyByIds(ids: string[]): Promise<(User & Document)[]> {
+    return this.userModel.find({ _id: { $in: ids } }).exec();
+  }
 }
