@@ -31,6 +31,12 @@
   <body>
     <h2>Socket.IO Message App 💌</h2>
 
+    <div>
+      <input type="text" id="tokenInput" placeholder="JWT (POST /auth/login)" />
+      <button id="connectButton">Connect</button>
+      <span id="status">disconnected</span>
+    </div>
+
     <input type="text" id="messageInput" placeholder="Type your message..." />
     <button id="sendButton">Send</button>
 
@@ -41,38 +47,64 @@
       src="https://cdn.jsdelivr.net/npm/toastify-js"
     ></script>
     <script>
-      const socket = io('http://127.0.0.1:4040/chat'); // Connects to the server
-
       const input = document.getElementById('messageInput');
       const button = document.getElementById('sendButton');
+      const tokenInput = document.getElementById('tokenInput');
+      const connectButton = document.getElementById('connectButton');
+      const statusSpan = document.getElementById('status');
       const messagesDiv = document.getElementById('messages');
 
       const channelId = '6888ef43224fe720e5a48fbd';
+      let socket = null;
+
+      // The gateway authenticates at the handshake now — an anonymous socket
+      // is disconnected immediately, so the token has to be supplied here.
+      function connect() {
+        const token = tokenInput.value.trim();
+        if (!token) return;
+
+        if (socket) socket.disconnect();
+        socket = io('http://127.0.0.1:4040/chat', { auth: { token } });
+
+        socket.on('connect', () => {
+          statusSpan.textContent = 'connected';
+          // Broadcasts are room-scoped: without this the socket receives
+          // nothing for the channel, not even its own messages.
+          socket.emit('subscribe', { channelId }, (ack) =>
+            console.log('subscribe ack:', ack),
+          );
+        });
+
+        socket.on('disconnect', () => {
+          statusSpan.textContent = 'disconnected';
+        });
+
+        socket.on(`channel:${channelId}:messages`, (msg) => {
+          const div = document.createElement('div');
+          div.classList.add('message');
+          div.textContent = `${msg.senderUsername}: ${msg.content}`;
+          messagesDiv.appendChild(div);
+        });
+
+        socket.on('error', (err) => {
+          console.error('Erro do servidor:', err);
+          Toastify({
+            text: `Error: ${err.message} ${(err.errors ?? []).reduce((acc, error) => `${acc} - ${JSON.stringify(error)}`, '')}`,
+            backgroundColor: 'red',
+            duration: 3000,
+          }).showToast();
+        });
+      }
+
+      connectButton.addEventListener('click', connect);
 
       // Emit message to server on button click
       button.addEventListener('click', () => {
         const msg = input.value.trim();
-        if (msg) {
+        if (msg && socket) {
           socket.emit('chat', { message: msg, channelId });
           input.value = '';
         }
-      });
-
-      // Listen to broadcasted messages
-      socket.on(`channel:${channelId}:messages`, (msg) => {
-        const div = document.createElement('div');
-        div.classList.add('message');
-        div.textContent = msg;
-        messagesDiv.appendChild(div);
-      });
-
-      socket.on('error', (err) => {
-        console.error('Erro do servidor:', err);
-        Toastify({
-          text: `Error: ${err.message} ${(err.errors ?? []).reduce((acc, error) => `${acc} - ${JSON.stringify(error)}`, '')}`,
-          backgroundColor: 'red',
-          duration: 3000,
-        }).showToast();
       });
     </script>
   </body>

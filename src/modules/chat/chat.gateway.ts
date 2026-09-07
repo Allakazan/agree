@@ -1,26 +1,23 @@
 import {
+  ConnectedSocket,
   MessageBody,
+  OnGatewayConnection,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { Server } from 'socket.io';
-import { ChatMessageDto } from './dto/chat.dto';
-import {
-  BadRequestException,
-  Inject,
-  UseFilters,
-  UseGuards,
-  UsePipes,
-} from '@nestjs/common';
+import { Server, Socket } from 'socket.io';
+import { ChannelSubscriptionDto, ChatMessageDto } from './dto/chat.dto';
+import { BadRequestException, UseFilters, UseGuards } from '@nestjs/common';
 import { WsValidationPipe } from 'src/common/pipes/ws-validation.pipe';
 import { WsGlobalExceptionFilter } from 'src/common/filters/ws-exception.filter';
-import { DRIZZLE } from 'src/drizzle/drizzle.module';
-import { DrizzleDB } from 'src/drizzle/types/drizzle';
 import { ChatService } from './chat.service';
 import { User } from 'src/modules/auth/decorators/user.decorator';
 import { LoggedUser } from 'src/modules/auth/types/loggedUser.type';
 import { AuthGuard } from 'src/modules/auth/guards/auth.guard';
+import { WsAuthService } from 'src/modules/auth/ws-auth.service';
+import { ServerService } from '../server/server.service';
+import { channelRoom, userRoom } from './chat.rooms';
 
 @WebSocketGateway(4040, {
   namespace: 'chat',
@@ -34,42 +31,107 @@ import { AuthGuard } from 'src/modules/auth/guards/auth.guard';
 })
 @UseFilters(new WsGlobalExceptionFilter())
 @UseGuards(AuthGuard)
-export class ChatGateway {
+export class ChatGateway implements OnGatewayConnection {
   constructor(
-    @Inject(DRIZZLE) private readonly drizzleService: DrizzleDB,
     private readonly chatService: ChatService,
+    private readonly serverService: ServerService,
+    private readonly wsAuthService: WsAuthService,
   ) {}
 
   @WebSocketServer()
   server: Server;
 
-  @SubscribeMessage('chat')
-  @UsePipes(new WsValidationPipe())
-  async handleEvent(
-    @MessageBody() dto: ChatMessageDto,
-    @User() user: LoggedUser,
-  ): Promise<any> {
-    try {
-      const inserted = await this.chatService.createMessagesAndConversation(
-        dto,
-        user.sub,
-        user.username,
-      );
-      const payload = {
-        ...inserted,
-        createdAt: inserted.createdAt?.toISOString(),
-      };
+  async handleConnection(client: Socket): Promise<void> {
+    const user = await this.wsAuthService.authenticate(client);
 
-      if (dto.channelId) {
-        this.server.emit(`channel:${dto.channelId}:messages`, payload);
-      } else {
-        this.server.emit(
-          `conversation:${inserted.conversationId}:messages`,
-          payload,
+    if (!user) {
+      client.emit('error', { status: 'error', message: 'Unauthorized' });
+      client.disconnect(true);
+      return;
+    }
+
+    (client.data as { user: LoggedUser }).user = user;
+
+    await client.join(userRoom(user.sub));
+  }
+
+  @SubscribeMessage('subscribe')
+  async handleSubscribe(
+    @MessageBody(new WsValidationPipe()) dto: ChannelSubscriptionDto,
+    @ConnectedSocket() client: Socket,
+    @User() user: LoggedUser,
+  ): Promise<{ status: string; channelId: string }> {
+    const room = channelRoom(dto.channelId);
+
+    if (!client.rooms.has(room)) {
+      const isMember = await this.serverService.isUserMemberOfChannelServer(
+        user.sub,
+        dto.channelId,
+      );
+
+      if (!isMember) {
+        // BadRequestException, not Forbidden: WsGlobalExceptionFilter only
+        // unwraps BadRequestException/WsException, anything else reaches the
+        // client as a generic "Internal server error".
+        throw new BadRequestException(
+          "You are not a member of this channel's server",
         );
       }
 
-      return inserted;
+      await client.join(room);
+    }
+
+    return { status: 'subscribed', channelId: dto.channelId };
+  }
+
+  @SubscribeMessage('unsubscribe')
+  async handleUnsubscribe(
+    @MessageBody(new WsValidationPipe()) dto: ChannelSubscriptionDto,
+    @ConnectedSocket() client: Socket,
+  ): Promise<{ status: string; channelId: string }> {
+    await client.leave(channelRoom(dto.channelId));
+
+    return { status: 'unsubscribed', channelId: dto.channelId };
+  }
+
+  @SubscribeMessage('chat')
+  async handleEvent(
+    @MessageBody(new WsValidationPipe()) dto: ChatMessageDto,
+    @ConnectedSocket() client: Socket,
+    @User() user: LoggedUser,
+  ): Promise<any> {
+    const room = dto.channelId ? channelRoom(dto.channelId) : undefined;
+
+    if (room && !client.rooms.has(room)) {
+      throw new BadRequestException(
+        'Subscribe to this channel before sending messages',
+      );
+    }
+
+    try {
+      const { message, recipients } =
+        await this.chatService.createMessagesAndConversation(
+          dto,
+          user.sub,
+          user.username,
+        );
+
+      const payload = {
+        ...message,
+        createdAt: message.createdAt?.toISOString(),
+      };
+
+      if (room) {
+        this.server.to(room).emit(`channel:${dto.channelId}:messages`, payload);
+      } else {
+        // `to()` de-duplicates sockets across rooms, so a participant on
+        // several devices still gets exactly one copy per socket.
+        this.server
+          .to(recipients.map(userRoom))
+          .emit(`conversation:${message.conversationId}:messages`, payload);
+      }
+
+      return message;
     } catch (error) {
       console.error(error);
       throw new BadRequestException(

@@ -1,0 +1,74 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project overview
+
+Agree is a Discord-clone backend built with NestJS. It uses two databases side by side:
+- **MongoDB** (via Mongoose) for servers and users — flexible, document-shaped entities.
+- **PostgreSQL** (via Drizzle ORM) for conversations and messages — relational, append-heavy chat data.
+
+Real-time chat is delivered over a Socket.IO WebSocket gateway; REST endpoints are served through standard Nest controllers and documented with Swagger.
+
+## Commands
+
+```bash
+# install deps
+yarn install
+
+# run
+yarn start          # once
+yarn start:dev       # watch mode
+yarn start:prod       # from dist/, after build
+
+# build
+yarn build
+
+# lint / format
+yarn lint             # eslint --fix over src/apps/libs/test
+yarn format            # prettier --write over src/test
+
+# tests
+yarn test                       # unit tests (jest, rootDir: src, *.spec.ts)
+yarn test:watch
+yarn test:cov
+yarn test:e2e                    # uses test/jest-e2e.json
+yarn test:debug                   # node --inspect-brk, --runInBand
+npx jest path/to/file.spec.ts     # run a single test file
+npx jest -t "test name"           # run tests matching a name
+
+# database
+yarn mongodb:seed                        # seeds MongoDB via src/seed.ts (ts-node)
+npx drizzle-kit generate                 # generate Postgres migrations from src/drizzle/schema.ts
+npx drizzle-kit migrate                  # apply migrations (drizzle.config.ts drives this)
+
+# local infra (Mongo, Postgres, Redis)
+docker-compose up -d
+```
+
+Swagger UI is served at `/api` once the app is running. Env vars live in `.env` (`DATABASE_URL` for Postgres, `MONGODB_URI` for Mongo, `JWT_SECRET`).
+
+## Architecture
+
+**Dual-database split by domain, not by module.** `AppModule` wires up both `MongooseModule` (config from `src/config/database.ts` → `database.mongodb.url`) and, per-feature, `DrizzleModule` (`src/drizzle/drizzle.module.ts`, injected via the `DRIZZLE` token, `database.postgresql.url`). When adding a feature, decide up front which store it belongs in — Mongo for document-like resource data (servers, users), Postgres/Drizzle for relational/chat data (conversations, messages) — rather than assuming one store for everything. Drizzle's schema/types live in `src/drizzle/schema.ts` and `src/drizzle/types/drizzle.d.ts`; Mongoose schemas live per-module under `schemas/*.schema.ts`.
+
+**Auth is global by default.** `AuthModule` registers `AuthGuard` as an `APP_GUARD`, so every route requires a valid Bearer JWT unless explicitly marked with the `@Public()` decorator (`src/modules/auth/decorators/ispublic.decorator.ts`). The guard decodes the JWT and attaches the payload to `request.user`; retrieve it in controllers with the `@User()` decorator (`src/modules/auth/decorators/user.decorator.ts`) rather than reading `req.user` directly. Passwords are hashed with `argon2`. The global `APP_GUARD` registration does **not** reach WS handlers, so `ChatGateway` applies `AuthGuard` explicitly with `@UseGuards` (and `ChatModule` re-provides it, since `AuthModule` doesn't export it). WS tokens are read from the `Authorization` header, `handshake.auth.token`, or the `agree_token` cookie — that extraction lives in `src/modules/auth/utils/ws-token.ts` and is shared by the guard and `WsAuthService`.
+
+**Chat is split: WS in, Postgres for storage, REST for history.** `ChatGateway` (namespace `chat`, currently hardcoded to port 4040) receives the `chat` message event, validates the payload with `WsValidationPipe` (`class-validator`, mirrors the HTTP `ValidationPipe` behavior for sockets), and delegates persistence to `ChatService`. `ChatService.createMessagesAndConversation` upserts a `conversations` row keyed by `relatedMongoChannelId` (a Mongo `Server`/channel ObjectID string bridging the two databases) before inserting into `messages`, and returns `{ message, recipients }`. Errors on the socket path are normalized by `WsGlobalExceptionFilter` into a standard `{status, message}` emit on the `error` event — note it only unwraps `BadRequestException`/`WsException`, so throw those from gateway handlers (anything else reaches the client as a generic "Internal server error"). REST reads of history go through `ChatController` → `ChatService.findAll`, which paginates with `limit`/`before` (ISO8601 cursor) over Drizzle.
+
+**Socket.IO rooms are the authorization boundary for channels.** Room names come from `src/modules/chat/chat.rooms.ts` — never build them inline.
+
+- `ChatGateway.handleConnection` authenticates the handshake via `WsAuthService.authenticate` (exported by `AuthModule`), disconnects anonymous sockets, and joins `user:<userId>`.
+- Channel rooms are joined **lazily**: the client emits `subscribe { channelId }`, and that handler is the *only* place `ServerService.isUserMemberOfChannelServer` is consulted. `unsubscribe` is the mirror.
+- Sending on `chat` requires the socket to already be in `channel:<channelId>` — presence in the room *is* the authorization, so `ChatService.findOrCreateChannelConversation` deliberately performs no membership check and must not be called from a new (e.g. REST) caller without one. Never `join()` a socket on the send path; that would hand write access to any socket that asks.
+- DMs/groups are delivered to each participant's `user:<id>` room, so a recipient needs no subscription and never has to know the conversation UUID.
+- Rooms are per-process. Running more than one instance needs `@socket.io/redis-adapter` (Redis is in `docker-compose.yml` but not yet wired up).
+
+**Cross-database references are plain strings, not foreign keys.** Postgres `conversations.relatedMongoChannelId` and Drizzle message `senderId` are just Mongo ObjectID strings with no DB-level referential integrity — validate with `@IsObjectID()` (`src/common/decorators/isObjectID.ts`) at the DTO layer instead of relying on the database.
+
+## Conventions
+
+- Module layout: `*.module.ts`, `*.controller.ts`, `*.service.ts`, `dto/`, `schemas/` (Mongo) — mirror this when adding a module.
+- On WS handlers, attach `WsValidationPipe` to the body param — `@MessageBody(new WsValidationPipe())` — never via `@UsePipes`. A handler-level pipe also runs against `@ConnectedSocket()`, and `plainToInstance(Socket, …)` throws, which surfaces to the client as a generic "Internal server error".
+- DTOs use `class-validator`/`class-transformer` decorators plus `@nestjs/swagger` `@ApiProperty` annotations for the generated docs.
+- ESLint has `@typescript-eslint/no-explicit-any` off and `no-floating-promises`/`no-unsafe-argument` set to `warn` (not `error`) — existing code relies on this looseness in places (e.g. `any` request/user types).
