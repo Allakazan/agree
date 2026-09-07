@@ -1,4 +1,10 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InferSelectModel, sql, eq, and, lt, desc } from 'drizzle-orm';
 import { DRIZZLE } from 'src/drizzle/drizzle.module';
 import { conversations, messages } from 'src/drizzle/schema';
@@ -25,15 +31,25 @@ export class ChatService {
     senderId: string,
     senderUsername: string,
   ): Promise<CreatedMessage> {
+    // One timestamp for both writes: the conversation upsert stamps
+    // lastMessageAt with it and the message row uses it as createdAt, so the
+    // denormalized column can never drift from the newest message.
+    const sentAt = new Date(); // Force UTC time
+
     const { id: conversationId, participants } = dto.channelId
-      ? await this.findOrCreateChannelConversation(dto.channelId)
-      : await this.findOrCreateDirectConversation(dto.recipientIds!, senderId);
+      ? await this.findOrCreateChannelConversation(dto.channelId, sentAt)
+      : await this.findOrCreateDirectConversation(
+          dto.recipientIds!,
+          senderId,
+          sentAt,
+        );
 
     const message = await this.insertMessage(
       conversationId,
       senderId,
       senderUsername,
       dto.message,
+      sentAt,
     );
 
     return { message, recipients: participants };
@@ -45,16 +61,19 @@ export class ChatService {
   // caller — REST, a queue consumer — must do that check itself first.
   private async findOrCreateChannelConversation(
     channelId: string,
+    sentAt: Date,
   ): Promise<{ id: string; participants: string[] }> {
     const [upserted] = await this.drizzleService
       .insert(conversations)
-      .values({ type: 'channel', relatedMongoChannelId: channelId })
+      .values({
+        type: 'channel',
+        relatedMongoChannelId: channelId,
+        lastMessageAt: sentAt,
+      })
+      // Bumping lastMessageAt doubles as the update that forces the RETURNING.
       .onConflictDoUpdate({
         target: conversations.relatedMongoChannelId,
-        set: {
-          // Set "falso", só pra forçar o RETURNING
-          relatedMongoChannelId: sql`excluded.related_mongo_channel_id`,
-        },
+        set: { lastMessageAt: sentAt },
       })
       .returning({ id: conversations.id });
 
@@ -64,6 +83,7 @@ export class ChatService {
   private async findOrCreateDirectConversation(
     recipientIds: string[],
     senderId: string,
+    sentAt: Date,
   ): Promise<{ id: string; participants: string[] }> {
     const participantIds = Array.from(new Set([senderId, ...recipientIds]));
 
@@ -78,10 +98,15 @@ export class ChatService {
 
     const [upserted] = await this.drizzleService
       .insert(conversations)
-      .values({ type, participants: sortedParticipants, dmKey })
+      .values({
+        type,
+        participants: sortedParticipants,
+        dmKey,
+        lastMessageAt: sentAt,
+      })
       .onConflictDoUpdate({
         target: conversations.dmKey,
-        set: { dmKey: sql`excluded.dm_key` },
+        set: { lastMessageAt: sentAt },
       })
       .returning({ id: conversations.id });
 
@@ -93,6 +118,7 @@ export class ChatService {
     senderId: string,
     senderUsername: string,
     message: string,
+    sentAt: Date,
   ): Promise<InferSelectModel<typeof messages>> {
     const [insertedMessage] = await this.drizzleService
       .insert(messages)
@@ -102,11 +128,100 @@ export class ChatService {
         senderUsername,
         senderAvatarUrl: '',
         content: message,
-        createdAt: new Date(), // Force UTC time
+        createdAt: sentAt,
       })
       .returning();
 
     return insertedMessage;
+  }
+
+  // Conversation ids only ever reach a client over the socket, so without this
+  // route a page refresh loses every DM. Ordered by the denormalized
+  // lastMessageAt, and paginated on the same column.
+  async findConversationsForUser(
+    userId: string,
+    { limit, before }: ListAllMessages,
+  ) {
+    const rows = await this.drizzleService
+      .select({
+        id: conversations.id,
+        type: conversations.type,
+        participantIds: conversations.participants,
+        createdAt: conversations.createdAt,
+        lastMessageAt: conversations.lastMessageAt,
+      })
+      .from(conversations)
+      .where(
+        and(
+          sql`${conversations.participants} @> ARRAY[${userId}]::varchar[]`,
+          before
+            ? lt(conversations.lastMessageAt, new Date(before))
+            : undefined,
+        ),
+      )
+      .orderBy(desc(conversations.lastMessageAt))
+      .limit(limit);
+
+    return this.hydrateParticipants(rows);
+  }
+
+  // The dm/group counterpart of findAllByChannel. Channel conversations have a
+  // null participants list, so they can never be read through this path — they
+  // go through findAllByChannel instead.
+  async findAllByConversation(
+    conversationId: string,
+    userId: string,
+    params: ListAllMessages,
+  ) {
+    const [conversation] = await this.drizzleService
+      .select({
+        id: conversations.id,
+        participants: conversations.participants,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1);
+
+    if (!conversation) {
+      throw new NotFoundException(`Conversation ${conversationId} not found`);
+    }
+
+    if (!conversation.participants?.includes(userId)) {
+      throw new ForbiddenException(
+        'You are not a participant of this conversation',
+      );
+    }
+
+    return this.findAll(conversationId, params);
+  }
+
+  // `participants` is a bare array of Mongo user id strings — no FK, different
+  // database — so display data has to come from Mongo in a second lookup.
+  // Without it a DM list is just opaque ids, and there is no user endpoint for
+  // a client to resolve them itself.
+  private async hydrateParticipants<
+    T extends { participantIds: string[] | null; lastMessageAt: Date | null },
+  >(rows: T[]) {
+    const ids = [...new Set(rows.flatMap((row) => row.participantIds ?? []))];
+    const users = await this.usersService.findManyByIds(ids);
+    const byId = new Map(
+      users.map((user) => [
+        String(user._id),
+        {
+          id: String(user._id),
+          username: user.username,
+          profileImageUrl: user.profileImageUrl,
+        },
+      ]),
+    );
+
+    return rows.map(({ participantIds, ...row }) => ({
+      ...row,
+      lastMessageAt: row.lastMessageAt?.toISOString() ?? null,
+      participants: (participantIds ?? []).map(
+        (id) => byId.get(id) ?? { id, username: null, profileImageUrl: null },
+      ),
+    }));
   }
 
   // Client only ever knows the Mongo channelId (relatedMongoChannelId) —

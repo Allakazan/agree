@@ -24,10 +24,18 @@ export const conversations = pgTable(
     relatedMongoChannelId: varchar('related_mongo_channel_id', { length: 36 }),
     dmKey: varchar('dm_key'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    // Denormalized from messages so the conversation list can be ordered
+    // without touching the messages table. Written by ChatService on the same
+    // upsert that resolves the conversation, so it costs no extra query.
+    lastMessageAt: timestamp('last_message_at', { withTimezone: true }),
   },
   (table) => [
     unique('unique_mongo_channel_id').on(table.relatedMongoChannelId),
     unique('unique_dm_key').on(table.dmKey),
+    // Listing a user's dm/group conversations filters with `participants @>
+    // ARRAY[userId]`, which needs GIN to avoid a sequential scan.
+    index('conversations_participants_idx').using('gin', table.participants),
+    index('conversations_last_message_at_idx').on(table.lastMessageAt),
   ],
 );
 
