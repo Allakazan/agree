@@ -46,7 +46,7 @@ npx drizzle-kit migrate                  # apply migrations (drizzle.config.ts d
 docker-compose up -d
 ```
 
-Swagger UI is served at `/api` once the app is running. Env vars live in `.env` (`DATABASE_URL` for Postgres, `MONGODB_URI` for Mongo, `JWT_SECRET`).
+Swagger UI is served at `/api` once the app is running. Env vars live in `.env` (`DATABASE_URL` for Postgres, `MONGODB_URI` for Mongo, `JWT_SECRET`); `.env.example` and the README table are the two places to document a new one. Config factories under `src/config/` are registered in `AppModule`'s `ConfigModule.forRoot({ load: [...] })` and read `process.env` through the `envInt`/`envList` parsers in `src/common/env.ts` — factories stay pure declaration, and a `<= 0` or non-numeric knob takes its default instead of propagating a nonsense value.
 
 ## Architecture
 
@@ -65,6 +65,16 @@ Swagger UI is served at `/api` once the app is running. Env vars live in `.env` 
 - Sending on `chat` requires the socket to already be in `channel:<channelId>` — presence in the room *is* the authorization, so `ChatService.findOrCreateChannelConversation` deliberately performs no membership check and must not be called from a new (e.g. REST) caller without one. Never `join()` a socket on the send path; that would hand write access to any socket that asks.
 - DMs/groups are delivered to each participant's `user:<id>` room, so a recipient needs no subscription and never has to know the conversation UUID.
 - Rooms are per-process. Running more than one instance needs `@socket.io/redis-adapter` (Redis is in `docker-compose.yml` but not yet wired up).
+
+**Voice is signaling only — media never touches this server.** Cloud Run carries no UDP, so a self-hosted SFU is impossible and audio goes browser↔browser over a P2P mesh. `VoiceGateway` (namespace `voice`) carries presence, relays SDP/ICE, and hands out TURN credentials; that is all. Design rationale lives in `docs/voice-webrtc.md`, the client contract in `docs/voice-client.md`.
+
+- **One authorization gate, same rule as chat.** `voice:join` is the only handler that consults `ServerService.findChannelForMember` (which also lets it reject `type !== VOICE`); every handler after it asserts `client.rooms.has(voiceRoom(channelId))` and **never** calls `join()`. A self-healing join on the signal path would hand a room to any socket that asked. Room names come from `src/modules/voice/voice.rooms.ts` — rooms are per-namespace, so `voice:<id>` is a different room from an identically named one in `chat`.
+- **Presence is behind an interface (`VOICE_PRESENCE_STORE`), keyed by socketId.** `InMemoryVoicePresenceService` is correct for exactly one instance — the same limit the socket.io rooms it mirrors already have — and the interface is the Redis seam, so both move together. Every method is async today for that reason.
+- **`handleDisconnect` is what makes presence trustworthy.** A closed tab, a dropped network, and Cloud Run's 60-minute request cap all land there; without it each leaves a ghost in the channel forever. It runs outside the exception filter, so it must never throw. Clients are expected to re-`voice:join` after a reconnect — the gateway does not restore anything.
+- **One socket per user per channel.** A second join from the same user evicts the older socket (`voice:evicted`, then disconnect) rather than letting a second tab hear itself. A repeated join from the *same* socket is idempotent and just re-acks.
+- **Topology promotion is one-way.** `VoiceTopologyService` promotes a room to `sfu` past `meshMax` and only clears it when the room empties (`release`), so a room oscillating at the threshold can't renegotiate on every join. There is no SFU yet, so a join past the limit is rejected outright — that is deliberate, not a stub.
+- **Bitrate is a published policy, not an enforced one.** `maxBitrate` is applied client-side via `RTCRtpSender.setParameters()`; the server ships a number in the join ack and trusts the client. Don't add SDP munging or adaptive bitrate — WebRTC's own GCC/TWCC already adapts.
+- **`VoiceIceService` never throws.** It degrades static TURN → Cloudflare → STUN-only, because a join must not fail just because a relay provider is down. Minted credentials are per-key, so they're cached and shared across joiners, with concurrent mints collapsed into one in-flight promise.
 
 **Cross-database references are plain strings, not foreign keys.** Postgres `conversations.relatedMongoChannelId` and Drizzle message `senderId` are just Mongo ObjectID strings with no DB-level referential integrity — validate with `@IsObjectID()` (`src/common/decorators/isObjectID.ts`) at the DTO layer instead of relying on the database.
 
