@@ -107,6 +107,21 @@ describe('AuthGuard', () => {
       });
       expect(request.user).toEqual(payload);
     });
+
+    it('falls back to the agree_token cookie when there is no Authorization header', async () => {
+      const payload = { sub: 'user-id', username: 'bruno' };
+      jwtService.verifyAsync.mockResolvedValue(payload);
+      const request: { headers: object; user?: unknown } = {
+        headers: { cookie: 'other=1; agree_token=cookie-token; foo=bar' },
+      };
+      const context = httpContext(request);
+
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+      expect(jwtService.verifyAsync).toHaveBeenCalledWith('cookie-token', {
+        secret: 'secret',
+      });
+      expect(request.user).toEqual(payload);
+    });
   });
 
   describe('WS requests', () => {

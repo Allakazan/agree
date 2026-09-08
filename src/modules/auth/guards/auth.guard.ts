@@ -13,7 +13,10 @@ import { Socket } from 'socket.io';
 import { LoggedUser } from '../types/loggedUser.type';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/ispublic.decorator';
-import { extractTokenFromSocket } from '../utils/ws-token';
+import {
+  extractTokenFromCookieHeader,
+  extractTokenFromSocket,
+} from '../utils/ws-token';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -35,7 +38,7 @@ export class AuthGuard implements CanActivate {
 
     const token = isWs
       ? extractTokenFromSocket(context.switchToWs().getClient<Socket>())
-      : this.extractTokenFromHeader(
+      : this.extractTokenFromRequest(
           context.switchToHttp().getRequest<Request>(),
         );
 
@@ -73,8 +76,15 @@ export class AuthGuard implements CanActivate {
     return true;
   }
 
-  private extractTokenFromHeader(request: Request): string | undefined {
-    const [type, token] = request.headers.authorization?.split(' ') ?? [];
-    return type === 'Bearer' ? token : undefined;
+  /**
+   * `Authorization: Bearer` header first (e.g. Swagger, API clients), then
+   * falls back to the httpOnly `agree_token` cookie — the frontend never
+   * holds the JWT in JS, so this is how it authenticates HTTP requests.
+   */
+  private extractTokenFromRequest(request: Request): string | undefined {
+    const [type, headerToken] = request.headers.authorization?.split(' ') ?? [];
+    if (type === 'Bearer' && headerToken) return headerToken;
+
+    return extractTokenFromCookieHeader(request.headers.cookie);
   }
 }

@@ -19,16 +19,36 @@ describe('AuthController', () => {
   });
 
   describe('signIn', () => {
-    it('delegates to AuthService.signIn with the login and password', async () => {
+    it('delegates to AuthService.signIn and sets the httpOnly cookie instead of returning the token', async () => {
       authService.signIn.mockResolvedValue({ access_token: 'jwt' });
+      const res = { cookie: jest.fn() };
 
-      const result = await controller.signIn({
-        login: 'bruno',
-        password: 'secret',
-      });
+      const result = await controller.signIn(
+        { login: 'bruno', password: 'secret' },
+        res as never,
+      );
 
       expect(authService.signIn).toHaveBeenCalledWith('bruno', 'secret');
-      expect(result).toEqual({ access_token: 'jwt' });
+      expect(res.cookie).toHaveBeenCalledWith(
+        'agree_token',
+        'jwt',
+        expect.objectContaining({ httpOnly: true }),
+      );
+      expect(result).toEqual({ ok: true });
+    });
+  });
+
+  describe('logout', () => {
+    it('clears the session cookie', () => {
+      const res = { clearCookie: jest.fn() };
+
+      const result = controller.logout(res as never);
+
+      expect(res.clearCookie).toHaveBeenCalledWith(
+        'agree_token',
+        expect.objectContaining({ path: '/' }),
+      );
+      expect(result).toEqual({ ok: true });
     });
   });
 
