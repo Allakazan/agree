@@ -1,4 +1,5 @@
 import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
+import { envList } from './env';
 
 /**
  * Allowed browser origins: `ORIGIN` (comma-separated) when set, otherwise
@@ -12,8 +13,10 @@ import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-option
  * would break exactly the case it is meant to make easy. `true` echoes the
  * caller's own origin back — allows everything *and* keeps credentials working.
  */
-export const corsOrigins: string[] | true = process.env.ORIGIN
-  ? process.env.ORIGIN.split(',').map((origin) => origin.trim())
+const configuredOrigins = envList(process.env.ORIGIN);
+
+export const corsOrigins: string[] | true = configuredOrigins.length
+  ? configuredOrigins
   : true;
 
 /** CORS for the REST API and Swagger UI. */

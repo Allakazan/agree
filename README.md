@@ -33,9 +33,26 @@ A comunicação de chat em tempo real é feita via **Socket.IO** (`@nestjs/webso
    | `JWT_SECRET`   | Segredo para assinar/validar os tokens JWT de autenticação     | *(defina um valor forte, ex.: `openssl rand -hex 32`)*          |
    | `ORIGIN`       | Origens liberadas no CORS (REST + WS), separadas por vírgula   | *(vazio = qualquer origem)*                                     |
 
-   > O WebSocket do chat (`ChatGateway`) é anexado ao servidor HTTP do Nest, ou seja, escuta na **mesma** porta da API (`PORT`) — o que separa os gateways são os namespaces (`/chat`), não portas. O CORS de REST e WS sai da mesma config em `src/common/cors.ts`: a lista do `ORIGIN` ou, se ele estiver vazio, qualquer origem. Nesse caso a origem é **refletida** (`origin: true`), não `*` — com `credentials: true`, o browser recusa o curinga em request credenciada, e o cookie `agree_token` é um dos caminhos de auth do WS.
+   > Os WebSockets (`ChatGateway` no namespace `/chat`, `VoiceGateway` no `/voice`) são anexados ao servidor HTTP do Nest, ou seja, escutam na **mesma** porta da API (`PORT`) — o que separa os gateways são os namespaces, não portas. O CORS de REST e WS sai da mesma config em `src/common/cors.ts`: a lista do `ORIGIN` ou, se ele estiver vazio, qualquer origem. Nesse caso a origem é **refletida** (`origin: true`), não `*` — com `credentials: true`, o browser recusa o curinga em request credenciada, e o cookie `agree_token` é um dos caminhos de auth do WS.
    >
    > O JWT expira em **7 dias** (`auth.module.ts`, `expiresIn: '7d'` — originalmente estava em 60s, aumentado a pedido para uso diário) e não há endpoint de refresh.
+
+3. Variáveis do módulo de voz (`src/config/voice.ts`). **Nenhuma é obrigatória** — todas têm default e o módulo sobe sem nenhuma delas:
+
+   | Variável                  | Descrição                                                                   | Default                          |
+   | ------------------------- | --------------------------------------------------------------------------- | -------------------------------- |
+   | `VOICE_MESH_MAX`          | Acima disso a sala precisaria de SFU; como o SFU é Fase 2, o join é recusado | `5`                              |
+   | `VIDEO_MESH_MAX`          | Idem, com publisher de vídeo. Sem efeito até a Fase 2                        | `2`                              |
+   | `VOICE_MAX_AUDIO_BITRATE` | Teto por stream de áudio (Opus mono), em bps                                 | `40000`                          |
+   | `VOICE_UPLINK_BUDGET`     | Uplink total assumido por cliente; no mesh o teto por peer divide isso       | `VOICE_MAX_AUDIO_BITRATE × VOICE_MESH_MAX` |
+   | `TURN_URL`                | TURN estático (lista por vírgula). **Vence** o Cloudflare quando definido    | *(vazio)*                        |
+   | `TURN_USER` / `TURN_PASS` | Credenciais do TURN estático                                                 | *(vazio)*                        |
+   | `CF_TURN_KEY_ID`          | Cloudflare Realtime TURN — id da chave                                       | *(vazio)*                        |
+   | `CF_TURN_KEY_API_TOKEN`   | Cloudflare Realtime TURN — token de API                                      | *(vazio)*                        |
+   | `CF_TURN_TTL`             | Validade das credenciais mintadas, em segundos (Cloudflare limita a 24h)     | `3600`                           |
+   | `STUN_URL`                | STUN de último recurso, quando não há TURN nenhum (lista por vírgula)        | `stun:stun.cloudflare.com:3478`  |
+
+   > O `VoiceIceService` escolhe em três níveis: **TURN estático** (se `TURN_URL`), senão **Cloudflare** (se as duas chaves), senão **STUN-only**. Sem TURN o áudio funciona em dev, mas ~15–20% dos usuários reais (NAT simétrico) não conseguem conectar. Um valor `<= 0` ou não-numérico em qualquer knob numérico cai no default em vez de propagar (`src/common/env.ts`).
 
 ## Subindo a infraestrutura (Docker)
 
@@ -113,6 +130,7 @@ yarn test:cov     # cobertura
 - `modules/users` — acesso a usuários (MongoDB), usado internamente pelo `auth`.
 - `modules/server` — CRUD básico de "servers" (MongoDB): `POST /server`, `GET /server`.
 - `modules/chat` — histórico de mensagens via REST (`GET /chat/:channelId`, resolve a conversa internamente pelo `relatedMongoChannelId`) e envio em tempo real via WebSocket (evento `chat` no namespace `/chat`, na mesma porta da API, protegido por `AuthGuard`).
+- `modules/voice` — sinalização WebRTC para canais de voz (namespace `/voice`) e roster via REST (`GET /voice/:channelId/participants`). **O áudio não passa pelo servidor**: Cloud Run não trafega UDP, então a mídia vai browser↔browser em mesh P2P e o backend só carrega presença, SDP/ICE e as credenciais de TURN. Fase 1 é só áudio, até `VOICE_MESH_MAX` participantes. Design em [docs/voice-webrtc.md](docs/voice-webrtc.md); o guia de integração do front está em [docs/voice-client.md](docs/voice-client.md).
 
 ## Notas de diagnóstico deste setup
 
