@@ -15,11 +15,15 @@ import { Public } from './decorators/ispublic.decorator';
 import { User } from './decorators/user.decorator';
 import { LoggedUser } from './types/loggedUser.type';
 import { clearTokenCookie, setTokenCookie } from './token-cookie';
+import { UsersService } from '../users/users.service';
 
 @Controller('auth')
 @ApiBearerAuth()
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private usersService: UsersService,
+  ) {}
 
   @HttpCode(HttpStatus.OK)
   @Post('login')
@@ -41,8 +45,15 @@ export class AuthController {
     return { ok: true };
   }
 
+  // The JWT payload (`LoggedUser`) only carries `sub`/`username` — it's
+  // never reissued just because a profile picture changed — so the picture
+  // itself is looked up fresh from Mongo on every call instead.
   @Get('profile')
-  getProfile(@User() user: LoggedUser) {
-    return user;
+  async getProfile(@User() user: LoggedUser) {
+    const dbUser = await this.usersService.findOne({ _id: user.sub });
+    return {
+      ...user,
+      profileImageUrl: dbUser?.profileImageUrl || null,
+    };
   }
 }

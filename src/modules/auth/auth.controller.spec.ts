@@ -1,18 +1,24 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { UsersService } from '../users/users.service';
 import { LoggedUser } from './types/loggedUser.type';
 
 describe('AuthController', () => {
   let controller: AuthController;
   let authService: { signIn: jest.Mock };
+  let usersService: { findOne: jest.Mock };
 
   beforeEach(async () => {
     authService = { signIn: jest.fn() };
+    usersService = { findOne: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuthController],
-      providers: [{ provide: AuthService, useValue: authService }],
+      providers: [
+        { provide: AuthService, useValue: authService },
+        { provide: UsersService, useValue: usersService },
+      ],
     }).compile();
 
     controller = module.get<AuthController>(AuthController);
@@ -53,10 +59,28 @@ describe('AuthController', () => {
   });
 
   describe('getProfile', () => {
-    it('returns the logged-in user from the request', () => {
+    it("merges the JWT payload with the user's current profileImageUrl from Mongo", async () => {
       const user: LoggedUser = { sub: 'user-id', username: 'bruno' };
+      usersService.findOne.mockResolvedValue({
+        profileImageUrl: 'https://example.com/bruno.png',
+      });
 
-      expect(controller.getProfile(user)).toBe(user);
+      const result = await controller.getProfile(user);
+
+      expect(usersService.findOne).toHaveBeenCalledWith({ _id: 'user-id' });
+      expect(result).toEqual({
+        ...user,
+        profileImageUrl: 'https://example.com/bruno.png',
+      });
+    });
+
+    it('falls back to null when the user has no profileImageUrl or no longer exists', async () => {
+      const user: LoggedUser = { sub: 'user-id', username: 'bruno' };
+      usersService.findOne.mockResolvedValue(null);
+
+      const result = await controller.getProfile(user);
+
+      expect(result).toEqual({ ...user, profileImageUrl: null });
     });
   });
 });
