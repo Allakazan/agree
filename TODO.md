@@ -21,7 +21,7 @@ Realtime SFU once a room outgrows it — Cloud Run allows no UDP, so we can neve
 ourselves.
 
 - [x] **Move the gateways off port `4040`** — `@WebSocketGateway()` now takes no port, so `/chat` rides the Nest HTTP server on `$PORT`. REST and WS share one `ORIGIN`-driven CORS config in `src/common/cors.ts`; `ORIGIN` documented in `.env.example` and the README.
-- [ ] **`ServerService.findChannelForMember`** — `isUserMemberOfChannelServer` projects `{ _id: 1 }` and throws the matched channel away, so nothing can tell a voice channel from a text one. Needs a `'channels.$'` variant.
+- [x] **`ServerService.findChannelForMember`** — projects `{ _id: 1, 'channels.$': 1 }`, so one query returns the matched channel and the caller can check `type`. Returns `null` for a malformed id, an unknown channel, or a non-member. `isUserMemberOfChannelServer` is untouched; both now parse the id through `toObjectId` in `src/common/objectid.ts`.
 - [ ] **Voice module, P2P mesh** — `voice` namespace, presence keyed by socket behind a Redis-swappable interface, Cloudflare TURN credentials, membership gate only on `voice:join`.
 - [ ] **`OnGatewayDisconnect`** — nothing in the codebase implements it. Without it a closed tab leaves a ghost in the channel forever, and Cloud Run's 60-minute request cap makes that routine rather than rare.
 - [ ] **Webcam / screenshare over the Cloudflare SFU** — with simulcast ladders split by `contentHint`, since text and motion want opposite tradeoffs. This is where the bandwidth bill actually lives; voice never approaches the free tier.

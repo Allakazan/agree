@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { NotFoundException } from '@nestjs/common';
+import { Types } from 'mongoose';
 import { ServerService } from './server.service';
 import { Server } from './schemas/server.schema';
 import { ChannelType } from './schemas/channel.schema';
@@ -181,6 +182,87 @@ describe('ServerService', () => {
         'server-id',
       );
       expect(result).toBe(true);
+    });
+  });
+
+  describe('findChannelForMember', () => {
+    const validChannelId = '507f1f77bcf86cd799439011';
+    const channel = {
+      _id: validChannelId,
+      name: 'lounge',
+      type: ChannelType.VOICE,
+    };
+
+    const mockServer = (value: unknown) =>
+      findOneMock.mockReturnValue({ exec: jest.fn().mockResolvedValue(value) });
+
+    it('returns null without querying when the channelId is malformed', async () => {
+      const result = await service.findChannelForMember('user-id', 'not-an-id');
+
+      expect(result).toBeNull();
+      expect(findOneMock).not.toHaveBeenCalled();
+    });
+
+    it('projects the matched channel alongside the server id', async () => {
+      mockServer({
+        _id: { toString: () => 'server-id' },
+        channels: [channel],
+      });
+      usersService.isMemberOfServer.mockResolvedValue(true);
+
+      const result = await service.findChannelForMember(
+        'user-id',
+        validChannelId,
+      );
+
+      expect(findOneMock).toHaveBeenCalledWith(
+        { 'channels._id': new Types.ObjectId(validChannelId) },
+        { _id: 1, 'channels.$': 1 },
+      );
+      expect(result).toBe(channel);
+    });
+
+    it('returns null when no server contains the channel', async () => {
+      mockServer(null);
+
+      const result = await service.findChannelForMember(
+        'user-id',
+        validChannelId,
+      );
+
+      expect(result).toBeNull();
+      expect(usersService.isMemberOfServer).not.toHaveBeenCalled();
+    });
+
+    it('returns null when the user is not a member of the owning server', async () => {
+      mockServer({
+        _id: { toString: () => 'server-id' },
+        channels: [channel],
+      });
+      usersService.isMemberOfServer.mockResolvedValue(false);
+
+      const result = await service.findChannelForMember(
+        'user-id',
+        validChannelId,
+      );
+
+      expect(usersService.isMemberOfServer).toHaveBeenCalledWith(
+        'user-id',
+        'server-id',
+      );
+      expect(result).toBeNull();
+    });
+
+    it('returns null when the projection came back with no channel', async () => {
+      mockServer({ _id: { toString: () => 'server-id' }, channels: [] });
+
+      const result = await service.findChannelForMember(
+        'user-id',
+        validChannelId,
+      );
+
+      expect(result).toBeNull();
+      expect(usersService.isMemberOfServer).not.toHaveBeenCalled();
     });
   });
 });

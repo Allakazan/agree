@@ -56,7 +56,7 @@ The socket foundation landed in `9ff92e3` and is in good shape. Do **not** rebui
 | --- | --- | --- |
 | `WsAuthService.authenticate(client)` | [ws-auth.service.ts](../src/modules/auth/ws-auth.service.ts) | Handshake auth in `handleConnection`. Never throws — returns `null` for anonymous. |
 | Room-name helpers | [chat.rooms.ts](../src/modules/chat/chat.rooms.ts) | Mirror as `voice.rooms.ts`. Never build room names inline. |
-| `ServerService.isUserMemberOfChannelServer` | [server.service.ts:61](../src/modules/server/server.service.ts#L61) | The membership gate on join. |
+| `ServerService.findChannelForMember` | [server.service.ts](../src/modules/server/server.service.ts) | The membership gate on join — returns the channel so `type` can be checked too. |
 | `WsValidationPipe` | [ws-validation.pipe.ts](../src/common/pipes/ws-validation.pipe.ts) | On `@MessageBody()` only — never `@UsePipes` (it would run against `@ConnectedSocket()` and throw). |
 | `WsGlobalExceptionFilter` | [ws-exception.filter.ts](../src/common/filters/ws-exception.filter.ts) | Only unwraps `BadRequestException`/`WsException` — throw those, not `ForbiddenException`. |
 | `@User()` decorator | [user.decorator.ts](../src/modules/auth/decorators/user.decorator.ts) | Reads `socket.data.user`. |
@@ -67,7 +67,7 @@ The socket foundation landed in `9ff92e3` and is in good shape. Do **not** rebui
 ## Gaps to fill
 
 1. **No `OnGatewayDisconnect` anywhere in the codebase.** Text chat doesn't need it; voice presence is meaningless without it (tab close = ghost user in the channel forever).
-2. **Nothing ever checks `channel.type`.** `isUserMemberOfChannelServer` projects `{ _id: 1 }` and discards the matched channel, so it can't tell voice from text.
+2. ~~**Nothing ever checks `channel.type`.**~~ — done in Phase 0.2; `findChannelForMember` returns the matched channel, so the voice gateway can reject `type !== VOICE`.
 3. ~~**Port `4040` is hardcoded** in the gateway decorator~~ — done in Phase 0.1; both gateways now share `$PORT`.
 
 ---
@@ -79,7 +79,7 @@ The socket foundation landed in `9ff92e3` and is in good shape. Do **not** rebui
 
 The two gateways then live on distinct namespaces (`chat`, `voice`) over the **same** TCP connection — the socket.io client reuses one `Manager` per URL, so this costs the browser nothing.
 
-**0.2 Add a channel-returning lookup to `ServerService`.**
+**0.2 Add a channel-returning lookup to `ServerService`.** ✅ **Done.**
 
 ```ts
 async findChannelForMember(
@@ -88,7 +88,7 @@ async findChannelForMember(
 ): Promise<Channel | null>
 ```
 
-Project `{ _id: 1, 'channels.$': 1 }` so one query returns the matched channel; reuse `usersService.isMemberOfServer` for the membership half. The voice gateway uses it to reject `type !== VOICE` and non-members in a single round trip. Leave `isUserMemberOfChannelServer` alone — chat still uses it.
+Projects `{ _id: 1, 'channels.$': 1 }` so one query returns the matched channel; the membership half reuses `usersService.isMemberOfServer`. The voice gateway rejects `type !== VOICE` and non-members in a single round trip. `null` covers a malformed id, an unknown channel, and a non-member alike — the caller never learns which, so a non-member can't probe for channel existence. `isUserMemberOfChannelServer` is unchanged; chat still uses it. The id parse both share now lives in [`src/common/objectid.ts`](../src/common/objectid.ts) as `toObjectId` — `new Types.ObjectId(…)` throws on malformed input and every caller here wants a miss instead.
 
 ---
 
