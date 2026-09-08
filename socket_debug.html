@@ -64,7 +64,8 @@
         if (!token) return;
 
         if (socket) socket.disconnect();
-        socket = io('http://127.0.0.1:4040/chat', { auth: { token } });
+        // Mesma porta da API: o gateway está anexado ao servidor HTTP do Nest.
+        socket = io('http://127.0.0.1:3000/chat', { auth: { token } });
 
         socket.on('connect', () => {
           statusSpan.textContent = 'connected';
