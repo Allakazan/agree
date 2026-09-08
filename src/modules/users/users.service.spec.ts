@@ -103,4 +103,19 @@ describe('UsersService', () => {
       expect(result).toBe(foundUsers);
     });
   });
+
+  describe('findAllExcept', () => {
+    it('queries the user model excluding the given id and returns the results', async () => {
+      const foundUsers = [{ id: 'a' }, { id: 'b' }];
+      const exec = jest.fn().mockResolvedValue(foundUsers);
+      userModel.find.mockReturnValue({ exec });
+
+      const result = await service.findAllExcept('user-id');
+
+      expect(userModel.find).toHaveBeenCalledWith({
+        _id: { $ne: 'user-id' },
+      });
+      expect(result).toBe(foundUsers);
+    });
+  });
 });

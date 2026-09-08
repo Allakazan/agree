@@ -27,4 +27,9 @@ export class UsersService {
   async findManyByIds(ids: string[]): Promise<(User & Document)[]> {
     return this.userModel.find({ _id: { $in: ids } }).exec();
   }
+
+  // Backs `GET /users` — the picker a client uses to start a DM.
+  async findAllExcept(userId: string): Promise<(User & Document)[]> {
+    return this.userModel.find({ _id: { $ne: userId } }).exec();
+  }
 }
