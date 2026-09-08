@@ -18,16 +18,14 @@ import { AuthGuard } from 'src/modules/auth/guards/auth.guard';
 import { WsAuthService } from 'src/modules/auth/ws-auth.service';
 import { ServerService } from '../server/server.service';
 import { channelRoom, userRoom } from './chat.rooms';
+import { wsCorsOptions } from 'src/common/cors';
 
-@WebSocketGateway(4040, {
+// No port argument: the gateway attaches to the Nest HTTP server on `$PORT`
+// instead of opening a second one. Cloud Run exposes exactly one port, and
+// namespaces — not ports — are what separate this gateway from the next.
+@WebSocketGateway({
   namespace: 'chat',
-  cors: {
-    origin: process.env.ORIGIN
-      ? process.env.ORIGIN.split(',')
-      : ['http://localhost:3001', 'http://127.0.0.1:5500'], // agree-app (Next.js) + socket_debug.html defaults
-    methods: ['GET', 'POST'],
-    credentials: true,
-  },
+  cors: wsCorsOptions,
 })
 @UseFilters(new WsGlobalExceptionFilter())
 @UseGuards(AuthGuard)
