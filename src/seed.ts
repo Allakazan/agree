@@ -156,6 +156,11 @@ async function seed() {
     `✅ ${users.length} usuários criados (senha padrão: "${SEED_USER_PASSWORD}", exceto admin)`,
   );
 
+  // Servers are created before any user exists, so none has a natural
+  // creator — `admin` (a member of every server) is seeded as the owner of
+  // all of them, so member add/remove has someone to authorize against.
+  await Server.updateMany({}, { $set: { ownerId: admin._id } });
+
   // 3. Channel messages — one `conversations` row per channel, seeded with
   // messages from that server's members (falls back to `admin` if a server
   // somehow has none, which can't happen since admin is in every server).

@@ -1,6 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
-import { NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Types } from 'mongoose';
 import { ServerService } from './server.service';
 import { Server } from './schemas/server.schema';
@@ -16,7 +20,13 @@ describe('ServerService', () => {
   let findByIdAndUpdateMock: jest.Mock;
   let findByIdMock: jest.Mock;
   let findOneMock: jest.Mock;
-  let usersService: { addServerId: jest.Mock; isMemberOfServer: jest.Mock };
+  let usersService: {
+    addServerId: jest.Mock;
+    isMemberOfServer: jest.Mock;
+    findOne: jest.Mock;
+    removeServerId: jest.Mock;
+    findMembersOfServer: jest.Mock;
+  };
 
   class MockServerModel {
     constructor(public data: CreateServerDto) {}
@@ -36,7 +46,13 @@ describe('ServerService', () => {
     findByIdAndUpdateMock = jest.fn();
     findByIdMock = jest.fn();
     findOneMock = jest.fn();
-    usersService = { addServerId: jest.fn(), isMemberOfServer: jest.fn() };
+    usersService = {
+      addServerId: jest.fn(),
+      isMemberOfServer: jest.fn(),
+      findOne: jest.fn(),
+      removeServerId: jest.fn(),
+      findMembersOfServer: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -66,7 +82,7 @@ describe('ServerService', () => {
 
       const result = await service.create(dto, 'creator-id');
 
-      expect(saveMock).toHaveBeenCalledWith(dto);
+      expect(saveMock).toHaveBeenCalledWith({ ...dto, ownerId: 'creator-id' });
       expect(usersService.addServerId).toHaveBeenCalledWith(
         'creator-id',
         'server-id',
@@ -76,16 +92,40 @@ describe('ServerService', () => {
   });
 
   describe('findAll', () => {
-    it('returns all servers from the model', async () => {
+    it("returns only the servers in the caller's serverIds", async () => {
       const servers = [{ id: '1', name: 'A' }];
       const exec = jest.fn().mockResolvedValue(servers);
       findMock.mockReturnValue({ exec });
+      usersService.findOne.mockResolvedValue({
+        serverIds: ['server-1', 'server-2'],
+      });
 
-      const result = await service.findAll();
+      const result = await service.findAll('user-id');
 
-      expect(findMock).toHaveBeenCalled();
+      expect(usersService.findOne).toHaveBeenCalledWith({ _id: 'user-id' });
+      expect(findMock).toHaveBeenCalledWith({
+        _id: { $in: ['server-1', 'server-2'] },
+      });
       expect(exec).toHaveBeenCalled();
       expect(result).toBe(servers);
+    });
+
+    it('returns an empty array without querying when the user has no servers', async () => {
+      usersService.findOne.mockResolvedValue({ serverIds: [] });
+
+      const result = await service.findAll('user-id');
+
+      expect(result).toEqual([]);
+      expect(findMock).not.toHaveBeenCalled();
+    });
+
+    it('returns an empty array when the user does not exist', async () => {
+      usersService.findOne.mockResolvedValue(null);
+
+      const result = await service.findAll('user-id');
+
+      expect(result).toEqual([]);
+      expect(findMock).not.toHaveBeenCalled();
     });
   });
 
@@ -118,14 +158,19 @@ describe('ServerService', () => {
   });
 
   describe('findChannelsByServer', () => {
-    it('returns the channels array projected from the server', async () => {
+    it('returns the channels array projected from the server when the caller is a member', async () => {
       const channels = [{ _id: 'channel-id', name: 'general', type: 'text' }];
       const exec = jest.fn().mockResolvedValue({ channels });
       findByIdMock.mockReturnValue({ exec });
+      usersService.isMemberOfServer.mockResolvedValue(true);
 
-      const result = await service.findChannelsByServer('server-id');
+      const result = await service.findChannelsByServer('server-id', 'user-id');
 
       expect(findByIdMock).toHaveBeenCalledWith('server-id', { channels: 1 });
+      expect(usersService.isMemberOfServer).toHaveBeenCalledWith(
+        'user-id',
+        'server-id',
+      );
       expect(result).toBe(channels);
     });
 
@@ -133,9 +178,20 @@ describe('ServerService', () => {
       const exec = jest.fn().mockResolvedValue(null);
       findByIdMock.mockReturnValue({ exec });
 
-      await expect(service.findChannelsByServer('server-id')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.findChannelsByServer('server-id', 'user-id'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws NotFoundException when the caller is not a member', async () => {
+      const channels = [{ _id: 'channel-id', name: 'general', type: 'text' }];
+      const exec = jest.fn().mockResolvedValue({ channels });
+      findByIdMock.mockReturnValue({ exec });
+      usersService.isMemberOfServer.mockResolvedValue(false);
+
+      await expect(
+        service.findChannelsByServer('server-id', 'user-id'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -263,6 +319,136 @@ describe('ServerService', () => {
 
       expect(result).toBeNull();
       expect(usersService.isMemberOfServer).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findMembers', () => {
+    it('returns the roster when the caller is a member', async () => {
+      const members = [{ id: 'a' }, { id: 'b' }];
+      findByIdMock.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ _id: 'server-id' }),
+      });
+      usersService.isMemberOfServer.mockResolvedValue(true);
+      usersService.findMembersOfServer.mockResolvedValue(members);
+
+      const result = await service.findMembers('server-id', 'user-id');
+
+      expect(usersService.findMembersOfServer).toHaveBeenCalledWith(
+        'server-id',
+      );
+      expect(result).toBe(members);
+    });
+
+    it('throws NotFoundException when the server does not exist', async () => {
+      findByIdMock.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
+
+      await expect(service.findMembers('server-id', 'user-id')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('throws NotFoundException when the caller is not a member', async () => {
+      findByIdMock.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ _id: 'server-id' }),
+      });
+      usersService.isMemberOfServer.mockResolvedValue(false);
+
+      await expect(service.findMembers('server-id', 'user-id')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(usersService.findMembersOfServer).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('addMember', () => {
+    const mockOwnedServer = (ownerId: string | undefined) =>
+      findByIdMock.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ _id: 'server-id', ownerId }),
+      });
+
+    it('adds the target user when the caller is the owner', async () => {
+      mockOwnedServer('owner-id');
+      usersService.findOne.mockResolvedValue({ _id: 'target-id' });
+      usersService.addServerId.mockResolvedValue(undefined);
+
+      await service.addMember('server-id', 'owner-id', 'target-id');
+
+      expect(usersService.addServerId).toHaveBeenCalledWith(
+        'target-id',
+        'server-id',
+      );
+    });
+
+    it('throws ForbiddenException when the caller is not the owner', async () => {
+      mockOwnedServer('owner-id');
+
+      await expect(
+        service.addMember('server-id', 'someone-else', 'target-id'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(usersService.addServerId).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when the server has no owner yet', async () => {
+      mockOwnedServer(undefined);
+
+      await expect(
+        service.addMember('server-id', 'owner-id', 'target-id'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('throws NotFoundException when the server does not exist', async () => {
+      findByIdMock.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
+
+      await expect(
+        service.addMember('server-id', 'owner-id', 'target-id'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws NotFoundException when the target user does not exist', async () => {
+      mockOwnedServer('owner-id');
+      usersService.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.addMember('server-id', 'owner-id', 'target-id'),
+      ).rejects.toThrow(NotFoundException);
+      expect(usersService.addServerId).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('removeMember', () => {
+    const mockOwnedServer = (ownerId: string | undefined) =>
+      findByIdMock.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ _id: 'server-id', ownerId }),
+      });
+
+    it('removes the target user when the caller is the owner', async () => {
+      mockOwnedServer('owner-id');
+      usersService.removeServerId.mockResolvedValue(undefined);
+
+      await service.removeMember('server-id', 'owner-id', 'target-id');
+
+      expect(usersService.removeServerId).toHaveBeenCalledWith(
+        'target-id',
+        'server-id',
+      );
+    });
+
+    it('throws ForbiddenException when the caller is not the owner', async () => {
+      mockOwnedServer('owner-id');
+
+      await expect(
+        service.removeMember('server-id', 'someone-else', 'target-id'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(usersService.removeServerId).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when the owner tries to remove themselves', async () => {
+      mockOwnedServer('owner-id');
+
+      await expect(
+        service.removeMember('server-id', 'owner-id', 'owner-id'),
+      ).rejects.toThrow(BadRequestException);
+      expect(usersService.removeServerId).not.toHaveBeenCalled();
     });
   });
 });

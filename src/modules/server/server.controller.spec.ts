@@ -14,6 +14,9 @@ describe('ServerController', () => {
     findAll: jest.Mock;
     createChannel: jest.Mock;
     findChannelsByServer: jest.Mock;
+    findMembers: jest.Mock;
+    addMember: jest.Mock;
+    removeMember: jest.Mock;
   };
   const user: LoggedUser = { sub: 'user-id', username: 'bruno' };
   const dto: CreateServerDto = {
@@ -29,6 +32,9 @@ describe('ServerController', () => {
       findAll: jest.fn(),
       createChannel: jest.fn(),
       findChannelsByServer: jest.fn(),
+      findMembers: jest.fn(),
+      addMember: jest.fn(),
+      removeMember: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -64,12 +70,13 @@ describe('ServerController', () => {
   });
 
   describe('find', () => {
-    it('returns all servers from ServerService.findAll', async () => {
+    it("returns the caller's servers from ServerService.findAll", async () => {
       const servers = [{ id: '1', name: 'A' }];
       serverService.findAll.mockResolvedValue(servers);
 
-      const result = await controller.find();
+      const result = await controller.find(user);
 
+      expect(serverService.findAll).toHaveBeenCalledWith(user.sub);
       expect(result).toBe(servers);
     });
   });
@@ -98,12 +105,57 @@ describe('ServerController', () => {
       const channels = [{ _id: 'channel-id', name: 'general', type: 'text' }];
       serverService.findChannelsByServer.mockResolvedValue(channels);
 
-      const result = await controller.findChannels('server-id');
+      const result = await controller.findChannels('server-id', user);
 
       expect(serverService.findChannelsByServer).toHaveBeenCalledWith(
         'server-id',
+        user.sub,
       );
       expect(result).toBe(channels);
+    });
+  });
+
+  describe('findMembers', () => {
+    it('maps ServerService.findMembers to public fields', async () => {
+      serverService.findMembers.mockResolvedValue([
+        { _id: 'a', username: 'ana', profileImageUrl: 'a.png' },
+        { _id: 'b', username: 'bruno', profileImageUrl: null },
+      ]);
+
+      const result = await controller.findMembers('server-id', user);
+
+      expect(serverService.findMembers).toHaveBeenCalledWith(
+        'server-id',
+        user.sub,
+      );
+      expect(result).toEqual([
+        { id: 'a', username: 'ana', profileImageUrl: 'a.png' },
+        { id: 'b', username: 'bruno', profileImageUrl: null },
+      ]);
+    });
+  });
+
+  describe('addMember', () => {
+    it('delegates to ServerService.addMember', async () => {
+      await controller.addMember('server-id', { userId: 'target-id' }, user);
+
+      expect(serverService.addMember).toHaveBeenCalledWith(
+        'server-id',
+        user.sub,
+        'target-id',
+      );
+    });
+  });
+
+  describe('removeMember', () => {
+    it('delegates to ServerService.removeMember', async () => {
+      await controller.removeMember('server-id', 'target-id', user);
+
+      expect(serverService.removeMember).toHaveBeenCalledWith(
+        'server-id',
+        user.sub,
+        'target-id',
+      );
     });
   });
 });

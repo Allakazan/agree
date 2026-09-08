@@ -89,6 +89,36 @@ describe('UsersService', () => {
     });
   });
 
+  describe('removeServerId', () => {
+    it('removes the server id from the user via $pull', async () => {
+      const exec = jest.fn().mockResolvedValue(undefined);
+      userModel.updateOne.mockReturnValue({ exec });
+
+      await service.removeServerId('user-id', 'server-id');
+
+      expect(userModel.updateOne).toHaveBeenCalledWith(
+        { _id: 'user-id' },
+        { $pull: { serverIds: 'server-id' } },
+      );
+      expect(exec).toHaveBeenCalled();
+    });
+  });
+
+  describe('findMembersOfServer', () => {
+    it('queries the user model for everyone with the given serverId', async () => {
+      const members = [{ id: 'a' }, { id: 'b' }];
+      const exec = jest.fn().mockResolvedValue(members);
+      userModel.find.mockReturnValue({ exec });
+
+      const result = await service.findMembersOfServer('server-id');
+
+      expect(userModel.find).toHaveBeenCalledWith({
+        serverIds: 'server-id',
+      });
+      expect(result).toBe(members);
+    });
+  });
+
   describe('findManyByIds', () => {
     it('queries the user model with $in and returns the results', async () => {
       const foundUsers = [{ id: 'a' }, { id: 'b' }];

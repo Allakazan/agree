@@ -24,8 +24,19 @@ export class UsersService {
     );
   }
 
+  async removeServerId(userId: string, serverId: string): Promise<void> {
+    await this.userModel
+      .updateOne({ _id: userId }, { $pull: { serverIds: serverId } })
+      .exec();
+  }
+
   async findManyByIds(ids: string[]): Promise<(User & Document)[]> {
     return this.userModel.find({ _id: { $in: ids } }).exec();
+  }
+
+  /** Backs the member list of a server — everyone with `serverId` in `serverIds`. */
+  async findMembersOfServer(serverId: string): Promise<(User & Document)[]> {
+    return this.userModel.find({ serverIds: serverId }).exec();
   }
 
   // Backs `GET /users` — the picker a client uses to start a DM.
