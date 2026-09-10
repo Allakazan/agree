@@ -30,14 +30,14 @@ describe('ServerService', () => {
 
   class MockServerModel {
     constructor(public data: CreateServerDto) {}
-    save() {
+    save(): unknown {
       return saveMock(this.data);
     }
-    static find = (...args: unknown[]) => findMock(...args);
-    static findByIdAndUpdate = (...args: unknown[]) =>
+    static find = (...args: unknown[]): unknown => findMock(...args);
+    static findByIdAndUpdate = (...args: unknown[]): unknown =>
       findByIdAndUpdateMock(...args);
-    static findById = (...args: unknown[]) => findByIdMock(...args);
-    static findOne = (...args: unknown[]) => findOneMock(...args);
+    static findById = (...args: unknown[]): unknown => findByIdMock(...args);
+    static findOne = (...args: unknown[]): unknown => findOneMock(...args);
   }
 
   beforeEach(async () => {

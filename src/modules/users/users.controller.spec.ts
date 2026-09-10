@@ -43,7 +43,11 @@ describe('UsersController', () => {
 
       expect(usersService.findAllExcept).toHaveBeenCalledWith('caller-id');
       expect(result).toEqual([
-        { id: 'user-a', username: 'ana', profileImageUrl: 'http://example.com/ana.png' },
+        {
+          id: 'user-a',
+          username: 'ana',
+          profileImageUrl: 'http://example.com/ana.png',
+        },
         { id: 'user-b', username: 'bruno', profileImageUrl: null },
       ]);
     });

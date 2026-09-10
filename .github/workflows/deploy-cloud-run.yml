@@ -34,11 +34,8 @@ jobs:
       - run: yarn install --frozen-lockfile
 
       # Sem `--fix` (ao contrário do `yarn lint`): em CI não faz sentido
-      # reescrever arquivos que ninguém vai commitar. Informativo por enquanto —
-      # há 6 erros pré-existentes em `*.spec.ts`, então bloquear o deploy nisso
-      # deixaria a master travada. Tire o `continue-on-error` quando limpar.
+      # reescrever arquivos que ninguém vai commitar.
       - name: Lint
-        continue-on-error: true
         run: npx eslint "{src,apps,libs,test}/**/*.ts"
 
       - name: Testes unitários
