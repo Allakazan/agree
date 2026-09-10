@@ -124,6 +124,14 @@ yarn test:e2e     # end-to-end
 yarn test:cov     # cobertura
 ```
 
+## Deploy (GCP Cloud Run)
+
+Todo push na `master` dispara [`.github/workflows/deploy-cloud-run.yml`](.github/workflows/deploy-cloud-run.yml): testes, `drizzle-kit migrate` no Postgres de produção, build da imagem do [`Dockerfile`](Dockerfile), push no Artifact Registry e `gcloud run deploy`. As migrations rodam **antes** do deploy — se falharem, a revisão nova não sobe. O MongoDB não tem migrations (o Mongoose cria collections e índices sozinho). O serviço sobe com `min-instances=0`, `max-instances=1`, 1 vCPU, 512Mi, concorrência 500 e timeout de 3600s (billing por request).
+
+> `max-instances=1` não é economia: as rooms do Socket.IO vivem na memória do processo, então uma segunda instância parte o chat e a voz ao meio. Subir esse número exige o `@socket.io/redis-adapter` antes.
+
+O setup de GCP (Artifact Registry, Secret Manager, service accounts) e as variáveis que o workflow espera no GitHub estão em [docs/deploy-cloud-run.md](docs/deploy-cloud-run.md).
+
 ## Estrutura de módulos
 
 - `modules/auth` — login (`POST /auth/login`) e perfil autenticado (`GET /auth/profile`), guard JWT global (rotas marcadas com `@Public()` não exigem token).

@@ -1,0 +1,259 @@
+name: Deploy to Cloud Run
+
+# Sobe para o Cloud Run a cada push na master (e sob demanda pelo botão
+# "Run workflow"). Setup de GCP, secrets e variáveis: docs/deploy-cloud-run.md.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# Um deploy por vez: dois pushes seguidos não podem competir pela mesma revisão.
+concurrency:
+  group: deploy-cloud-run
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION || 'southamerica-east1' }}
+  SERVICE: ${{ vars.CLOUD_RUN_SERVICE || 'agree-server' }}
+  REPOSITORY: ${{ vars.AR_REPOSITORY || 'agree' }}
+
+jobs:
+  test:
+    name: Lint, test e build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - run: yarn install --frozen-lockfile
+
+      # Sem `--fix` (ao contrário do `yarn lint`): em CI não faz sentido
+      # reescrever arquivos que ninguém vai commitar. Informativo por enquanto —
+      # há 6 erros pré-existentes em `*.spec.ts`, então bloquear o deploy nisso
+      # deixaria a master travada. Tire o `continue-on-error` quando limpar.
+      - name: Lint
+        continue-on-error: true
+        run: npx eslint "{src,apps,libs,test}/**/*.ts"
+
+      - name: Testes unitários
+        run: yarn test --ci
+
+      - name: Build
+        run: yarn build
+
+  # Antes do deploy, nunca depois: a revisão nova pode consultar coluna que só
+  # existe depois da migration. O `concurrency` do workflow já garante que dois
+  # pushes não rodem `drizzle-kit migrate` ao mesmo tempo.
+  migrate:
+    name: Migrations do Postgres
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - run: yarn install --frozen-lockfile
+
+      # O runner não tem o socket que o Cloud Run monta, e liberar o IP público
+      # da instância para os IPs dinâmicos do GitHub significaria 0.0.0.0/0 nas
+      # redes autorizadas. O proxy resolve os dois: túnel TLS autenticado pela
+      # `github-deployer` (que precisa de roles/cloudsql.client), escutando local.
+      - name: Autenticar no Google Cloud
+        if: vars.CLOUDSQL_INSTANCE != ''
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Subir o Cloud SQL Auth Proxy
+        if: vars.CLOUDSQL_INSTANCE != ''
+        env:
+          CLOUDSQL_INSTANCE: ${{ vars.CLOUDSQL_INSTANCE }}
+          PROXY_VERSION: ${{ vars.CLOUDSQL_PROXY_VERSION || '2.15.2' }}
+        run: |
+          set -euo pipefail
+          curl -sSLf -o cloud-sql-proxy \
+            "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${PROXY_VERSION}/cloud-sql-proxy.linux.amd64"
+          chmod +x cloud-sql-proxy
+          # `nohup` + redirect: um processo em background segurando o stdout do
+          # step faz o job travar esperando ele fechar.
+          nohup ./cloud-sql-proxy "$CLOUDSQL_INSTANCE" --port 5432 --health-check \
+            > proxy.log 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:9090/readiness > /dev/null; then
+              echo "proxy pronto"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Cloud SQL Auth Proxy não ficou pronto em 30s"
+          cat proxy.log
+          exit 1
+
+      - name: Aplicar migrations
+        env:
+          # Com Cloud SQL, esta secret aponta para o proxy do step anterior:
+          # postgresql://USUARIO:SENHA@127.0.0.1:5432/BANCO
+          # (a string com `?host=/cloudsql/...` é só do runtime do Cloud Run).
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "::error::Secret DATABASE_URL não configurada — veja docs/deploy-cloud-run.md"
+            exit 1
+          fi
+          npx drizzle-kit migrate
+
+  deploy:
+    name: Build da imagem e deploy
+    needs: migrate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # necessário se você migrar para Workload Identity Federation
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Autenticar no Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          # Alternativa sem chave (recomendada quando puder configurar o pool):
+          # workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          # service_account: ${{ vars.GCP_DEPLOYER_SA }}
+          token_format: access_token
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # Login por access token, e não `gcloud auth configure-docker`: o buildx
+      # roda num container e o credential helper do gcloud nem sempre é
+      # resolvido de lá.
+      - name: Login no Artifact Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.GCP_REGION || 'southamerica-east1' }}-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Montar referência da imagem
+        id: image
+        run: |
+          set -euo pipefail
+          base="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/$SERVICE"
+          echo "sha=$base:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "latest=$base:latest" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build e push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.image.outputs.sha }}
+            ${{ steps.image.outputs.latest }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Só entra no comando o que estiver realmente definido: um knob de voz
+      # vazio precisa ficar ausente para o default de `src/common/env.ts` valer.
+      - name: Montar env vars do serviço
+        id: envs
+        env:
+          ORIGIN: ${{ vars.ORIGIN }}
+          VOICE_MESH_MAX: ${{ vars.VOICE_MESH_MAX }}
+          VIDEO_MESH_MAX: ${{ vars.VIDEO_MESH_MAX }}
+          VOICE_MAX_AUDIO_BITRATE: ${{ vars.VOICE_MAX_AUDIO_BITRATE }}
+          VOICE_UPLINK_BUDGET: ${{ vars.VOICE_UPLINK_BUDGET }}
+          TURN_URL: ${{ vars.TURN_URL }}
+          TURN_USER: ${{ vars.TURN_USER }}
+          CF_TURN_KEY_ID: ${{ vars.CF_TURN_KEY_ID }}
+          CF_TURN_TTL: ${{ vars.CF_TURN_TTL }}
+          STUN_URL: ${{ vars.STUN_URL }}
+          EXTRA_ENV_VARS: ${{ vars.EXTRA_ENV_VARS }}
+        run: |
+          set -euo pipefail
+          # `^@@^` troca o separador do gcloud: ORIGIN e STUN_URL são listas
+          # separadas por vírgula e seriam quebradas pelo delimitador default.
+          pairs="NODE_ENV=production"
+          for name in ORIGIN VOICE_MESH_MAX VIDEO_MESH_MAX VOICE_MAX_AUDIO_BITRATE \
+                      VOICE_UPLINK_BUDGET TURN_URL TURN_USER CF_TURN_KEY_ID \
+                      CF_TURN_TTL STUN_URL; do
+            value="${!name:-}"
+            if [ -n "$value" ]; then
+              pairs="$pairs@@$name=$value"
+            fi
+          done
+          if [ -n "${EXTRA_ENV_VARS:-}" ]; then
+            pairs="$pairs@@$EXTRA_ENV_VARS"
+          fi
+          echo "pairs=^@@^$pairs" >> "$GITHUB_OUTPUT"
+
+      - name: Montar secrets do serviço
+        id: secrets
+        env:
+          EXTRA_SECRETS: ${{ vars.EXTRA_SECRETS }}
+        run: |
+          set -euo pipefail
+          refs="DATABASE_URL=agree-database-url:latest"
+          refs="$refs,MONGODB_URI=agree-mongodb-uri:latest"
+          refs="$refs,JWT_SECRET=agree-jwt-secret:latest"
+          if [ -n "${EXTRA_SECRETS:-}" ]; then
+            refs="$refs,$EXTRA_SECRETS"
+          fi
+          echo "refs=$refs" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy no Cloud Run
+        env:
+          CLOUDSQL_INSTANCE: ${{ vars.CLOUDSQL_INSTANCE }}
+        run: |
+          set -euo pipefail
+          # Sem este flag o conector não é anexado e o socket
+          # /cloudsql/<instância> simplesmente não existe no container — a
+          # connection string com `?host=` aponta para um caminho vazio.
+          extra=()
+          if [ -n "${CLOUDSQL_INSTANCE:-}" ]; then
+            extra+=(--add-cloudsql-instances "$CLOUDSQL_INSTANCE")
+          fi
+          gcloud run deploy "$SERVICE" \
+            "${extra[@]}" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --image "${{ steps.image.outputs.sha }}" \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 8080 \
+            --cpu 1 \
+            --memory 512Mi \
+            --min-instances 0 \
+            --max-instances 1 \
+            --concurrency 500 \
+            --timeout 3600 \
+            --cpu-throttling \
+            --set-env-vars "${{ steps.envs.outputs.pairs }}" \
+            --set-secrets "${{ steps.secrets.outputs.refs }}" \
+            --labels "commit=${GITHUB_SHA}" \
+            --quiet
+
+      - name: URL do serviço
+        run: |
+          set -euo pipefail
+          url=$(gcloud run services describe "$SERVICE" \
+            --project "$PROJECT_ID" --region "$REGION" \
+            --format 'value(status.url)')
+          echo "### Deploy concluído" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Serviço: \`$SERVICE\` (\`$REGION\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- URL: $url" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Imagem: \`${{ steps.image.outputs.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
