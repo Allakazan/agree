@@ -25,7 +25,9 @@ describe('AuthController', () => {
   });
 
   describe('signIn', () => {
-    it('delegates to AuthService.signIn and sets the httpOnly cookie instead of returning the token', async () => {
+    // O token sai pelos dois caminhos de propósito: cookie para um chamador
+    // same-site, body para agree-app, que é cross-site e não recebe o cookie.
+    it('delegates to AuthService.signIn, sets the httpOnly cookie and returns the token in the body', async () => {
       authService.signIn.mockResolvedValue({ access_token: 'jwt' });
       const res = { cookie: jest.fn() };
 
@@ -40,7 +42,7 @@ describe('AuthController', () => {
         'jwt',
         expect.objectContaining({ httpOnly: true }),
       );
-      expect(result).toEqual({ ok: true });
+      expect(result).toEqual({ ok: true, access_token: 'jwt' });
     });
   });
 

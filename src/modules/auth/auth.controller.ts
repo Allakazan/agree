@@ -25,6 +25,14 @@ export class AuthController {
     private usersService: UsersService,
   ) {}
 
+  /**
+   * The token goes out twice, on purpose. The cookie serves a same-site
+   * caller (Swagger, a future web build on the API's own domain); the body
+   * serves agree-app, which is cross-site — it runs on `tauri.localhost`
+   * against this backend on another origin, so a `SameSite=Lax` cookie is
+   * neither stored nor sent there, and it authenticates by holding the token
+   * itself (`Authorization: Bearer` on REST, socket.io `auth` on WS).
+   */
   @HttpCode(HttpStatus.OK)
   @Post('login')
   @Public()
@@ -34,7 +42,7 @@ export class AuthController {
   ) {
     const { access_token } = await this.authService.signIn(login, password);
     setTokenCookie(res, access_token);
-    return { ok: true };
+    return { ok: true, access_token };
   }
 
   @HttpCode(HttpStatus.OK)
