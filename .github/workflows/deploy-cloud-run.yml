@@ -131,26 +131,25 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Autenticar no Google Cloud
-        id: auth
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
           # Alternativa sem chave (recomendada quando puder configurar o pool):
           # workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           # service_account: ${{ vars.GCP_DEPLOYER_SA }}
-          token_format: access_token
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      # Login por access token, e não `gcloud auth configure-docker`: o buildx
-      # roda num container e o credential helper do gcloud nem sempre é
-      # resolvido de lá.
+      # `_json_key` com a chave crua: o Artifact Registry aceita esse usuário
+      # especial. Um access_token exigiria a SA podendo se auto-impersonar
+      # (roles/iam.serviceAccountTokenCreator sobre ela mesma), e o credential
+      # helper do gcloud nem sempre é resolvido de dentro do buildx.
       - name: Login no Artifact Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ vars.GCP_REGION || 'southamerica-east1' }}-docker.pkg.dev
-          username: oauth2accesstoken
-          password: ${{ steps.auth.outputs.access_token }}
+          username: _json_key
+          password: ${{ secrets.GCP_SA_KEY }}
 
       - name: Montar referência da imagem
         id: image
