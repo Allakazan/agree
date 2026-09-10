@@ -36,18 +36,27 @@ export class ChatService {
     // denormalized column can never drift from the newest message.
     const sentAt = new Date(); // Force UTC time
 
-    const { id: conversationId, participants } = dto.channelId
-      ? await this.findOrCreateChannelConversation(dto.channelId, sentAt)
-      : await this.findOrCreateDirectConversation(
-          dto.recipientIds!,
-          senderId,
-          sentAt,
-        );
+    // The JWT only carries sub/username and is never reissued when a picture
+    // changes, so the avatar is read fresh from Mongo — alongside the upsert,
+    // so it adds no latency to the send.
+    const [{ id: conversationId, participants }, sender] = await Promise.all([
+      dto.channelId
+        ? this.findOrCreateChannelConversation(dto.channelId, sentAt)
+        : this.findOrCreateDirectConversation(
+            dto.recipientIds!,
+            senderId,
+            sentAt,
+          ),
+      this.usersService.findOne({ _id: senderId }),
+    ]);
 
     const message = await this.insertMessage(
       conversationId,
       senderId,
       senderUsername,
+      // A snapshot, like senderUsername: '' means "no picture", which the
+      // client renders as initials.
+      sender?.profileImageUrl || '',
       dto.message,
       sentAt,
     );
@@ -117,6 +126,7 @@ export class ChatService {
     conversationId: string,
     senderId: string,
     senderUsername: string,
+    senderAvatarUrl: string,
     message: string,
     sentAt: Date,
   ): Promise<InferSelectModel<typeof messages>> {
@@ -126,7 +136,7 @@ export class ChatService {
         conversationId,
         senderId,
         senderUsername,
-        senderAvatarUrl: '',
+        senderAvatarUrl,
         content: message,
         createdAt: sentAt,
       })

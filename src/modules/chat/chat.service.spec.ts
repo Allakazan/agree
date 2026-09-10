@@ -22,7 +22,7 @@ describe('ChatService', () => {
     orderBy: jest.Mock;
     limit: jest.Mock;
   };
-  let usersService: { findManyByIds: jest.Mock };
+  let usersService: { findManyByIds: jest.Mock; findOne: jest.Mock };
 
   beforeEach(async () => {
     drizzle = {
@@ -50,7 +50,10 @@ describe('ChatService', () => {
       }),
       limit: jest.fn(),
     };
-    usersService = { findManyByIds: jest.fn() };
+    usersService = {
+      findManyByIds: jest.fn(),
+      findOne: jest.fn().mockResolvedValue(null),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -137,6 +140,53 @@ describe('ChatService', () => {
 
     // The denormalized column must never drift from the newest message.
     expect(conversationValues.lastMessageAt).toBe(messageValues.createdAt);
+  });
+
+  describe('createMessagesAndConversation - sender avatar', () => {
+    beforeEach(() => {
+      drizzle.returning
+        .mockResolvedValueOnce([{ id: 'convo-id' }])
+        .mockResolvedValueOnce([{ id: 'message-id' }]);
+    });
+
+    it("stores the sender's current profileImageUrl from Mongo", async () => {
+      usersService.findOne.mockResolvedValue({
+        _id: 'user-id',
+        profileImageUrl: 'https://example.com/bruno.png',
+      });
+
+      await service.createMessagesAndConversation(
+        { message: 'hello', channelId: '507f1f77bcf86cd799439011' },
+        'user-id',
+        'bruno',
+      );
+
+      expect(usersService.findOne).toHaveBeenCalledWith({ _id: 'user-id' });
+      expect(drizzle.values).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          senderAvatarUrl: 'https://example.com/bruno.png',
+        }),
+      );
+    });
+
+    it.each([
+      ['has no profileImageUrl', { _id: 'user-id', profileImageUrl: '' }],
+      ['no longer exists', null],
+    ])("stores '' when the sender %s", async (_, sender) => {
+      usersService.findOne.mockResolvedValue(sender);
+
+      await service.createMessagesAndConversation(
+        { message: 'hello', channelId: '507f1f77bcf86cd799439011' },
+        'user-id',
+        'bruno',
+      );
+
+      expect(drizzle.values).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ senderAvatarUrl: '' }),
+      );
+    });
   });
 
   describe('createMessagesAndConversation - DM path', () => {
