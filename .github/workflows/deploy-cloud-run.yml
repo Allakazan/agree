@@ -74,43 +74,53 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Subir o Cloud SQL Auth Proxy
-        if: vars.CLOUDSQL_INSTANCE != ''
-        env:
-          CLOUDSQL_INSTANCE: ${{ vars.CLOUDSQL_INSTANCE }}
-          PROXY_VERSION: ${{ vars.CLOUDSQL_PROXY_VERSION || '2.15.2' }}
-        run: |
-          set -euo pipefail
-          curl -sSLf -o cloud-sql-proxy \
-            "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${PROXY_VERSION}/cloud-sql-proxy.linux.amd64"
-          chmod +x cloud-sql-proxy
-          # `nohup` + redirect: um processo em background segurando o stdout do
-          # step faz o job travar esperando ele fechar.
-          nohup ./cloud-sql-proxy "$CLOUDSQL_INSTANCE" --port 5432 --health-check \
-            > proxy.log 2>&1 &
-          for _ in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:9090/readiness > /dev/null; then
-              echo "proxy pronto"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "::error::Cloud SQL Auth Proxy não ficou pronto em 30s"
-          cat proxy.log
-          exit 1
-
       - name: Aplicar migrations
         env:
-          # Com Cloud SQL, esta secret aponta para o proxy do step anterior:
+          # Com Cloud SQL, esta secret aponta para o proxy que sobe aqui:
           # postgresql://USUARIO:SENHA@127.0.0.1:5432/BANCO
           # (a string com `?host=/cloudsql/...` é só do runtime do Cloud Run).
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CLOUDSQL_INSTANCE: ${{ vars.CLOUDSQL_INSTANCE }}
+          PROXY_VERSION: ${{ vars.CLOUDSQL_PROXY_VERSION || '2.15.2' }}
         run: |
           set -euo pipefail
           if [ -z "${DATABASE_URL:-}" ]; then
             echo "::error::Secret DATABASE_URL não configurada — veja docs/deploy-cloud-run.md"
             exit 1
           fi
+
+          # Proxy e migration no MESMO step de propósito: processo em background
+          # não sobrevive de forma garantida entre steps, e conectar num proxy
+          # que já morreu aparece como ECONNRESET na primeira query.
+          if [ -n "${CLOUDSQL_INSTANCE:-}" ]; then
+            curl -sSLf -o cloud-sql-proxy \
+              "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${PROXY_VERSION}/cloud-sql-proxy.linux.amd64"
+            chmod +x cloud-sql-proxy
+            ./cloud-sql-proxy "$CLOUDSQL_INSTANCE" --port 5432 --health-check --debug-logs \
+              > proxy.log 2>&1 &
+            proxy_pid=$!
+            # O log do proxy é o único lugar que diz *por quê* a conexão caiu —
+            # imprima sempre, não só quando ele falha ao subir.
+            trap 'echo "--- proxy.log ---"; cat proxy.log || true; kill "$proxy_pid" 2>/dev/null || true' EXIT
+
+            for _ in $(seq 1 30); do
+              if curl -sf http://127.0.0.1:9090/readiness > /dev/null; then
+                ready=1
+                break
+              fi
+              if ! kill -0 "$proxy_pid" 2>/dev/null; then
+                echo "::error::o Cloud SQL Auth Proxy morreu durante a subida"
+                exit 1
+              fi
+              sleep 1
+            done
+            if [ "${ready:-0}" != 1 ]; then
+              echo "::error::Cloud SQL Auth Proxy não ficou pronto em 30s"
+              exit 1
+            fi
+            echo "proxy pronto (pid $proxy_pid)"
+          fi
+
           npx drizzle-kit migrate
 
   deploy:
