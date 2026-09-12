@@ -2,13 +2,19 @@ import {
   ConnectedSocket,
   MessageBody,
   OnGatewayConnection,
+  OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { ChannelSubscriptionDto, ChatMessageDto } from './dto/chat.dto';
-import { BadRequestException, UseFilters, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Logger,
+  UseFilters,
+  UseGuards,
+} from '@nestjs/common';
 import { WsValidationPipe } from 'src/common/pipes/ws-validation.pipe';
 import { WsGlobalExceptionFilter } from 'src/common/filters/ws-exception.filter';
 import { ChatService } from './chat.service';
@@ -29,7 +35,9 @@ import { wsCorsOptions } from 'src/common/cors';
 })
 @UseFilters(new WsGlobalExceptionFilter())
 @UseGuards(AuthGuard)
-export class ChatGateway implements OnGatewayConnection {
+export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  private readonly logger = new Logger(ChatGateway.name);
+
   constructor(
     private readonly chatService: ChatService,
     private readonly serverService: ServerService,
@@ -51,6 +59,34 @@ export class ChatGateway implements OnGatewayConnection {
     (client.data as { user: LoggedUser }).user = user;
 
     await client.join(userRoom(user.sub));
+  }
+
+  /**
+   * Chat keeps no per-socket state of its own: socket.io drops a closed socket
+   * out of `user:<id>` and every `channel:<id>` room by itself, so there is
+   * nothing here to unwind today — unlike `VoiceGateway.handleDisconnect`,
+   * which has a presence store to sweep.
+   *
+   * The hook exists anyway because this is the one place a closed tab, a
+   * dropped network and Cloud Run's 60-minute request cap all reach, and it is
+   * where online presence lands when Redis goes in: `user:<id>` is already the
+   * room that broadcast will go out on. Until then it only records the
+   * departure.
+   *
+   * Runs outside `WsGlobalExceptionFilter`, like `handleConnection`, so it must
+   * never throw.
+   */
+  handleDisconnect(client: Socket): void {
+    // Optional: an unauthenticated handshake is disconnected by
+    // `handleConnection` before it ever attaches a user, and that socket lands
+    // here too.
+    const user = (client.data as { user?: LoggedUser } | undefined)?.user;
+
+    this.logger.debug(
+      user
+        ? `Socket ${client.id} disconnected (user ${user.sub})`
+        : `Unauthenticated socket ${client.id} disconnected`,
+    );
   }
 
   @SubscribeMessage('subscribe')

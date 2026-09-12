@@ -94,6 +94,24 @@ describe('ChatGateway', () => {
     });
   });
 
+  describe('handleDisconnect', () => {
+    it('records the departure of an authenticated socket without touching its rooms', () => {
+      client.data.user = user;
+      client.rooms.add('user:user-id');
+      client.rooms.add('channel:channel-id');
+
+      expect(() => gateway.handleDisconnect(asSocket())).not.toThrow();
+
+      // socket.io unwinds the rooms itself; the gateway must not fight it.
+      expect(client.leave).not.toHaveBeenCalled();
+      expect(to).not.toHaveBeenCalled();
+    });
+
+    it('does not throw for a socket that never authenticated', () => {
+      expect(() => gateway.handleDisconnect(asSocket())).not.toThrow();
+    });
+  });
+
   describe('subscribe', () => {
     it('joins the channel room when the user is a member of the channel server', async () => {
       serverService.isUserMemberOfChannelServer.mockResolvedValue(true);

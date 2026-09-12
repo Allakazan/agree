@@ -32,8 +32,8 @@ ourselves.
 
 - [x] **Move the gateways off port `4040`** — `@WebSocketGateway()` now takes no port, so `/chat` rides the Nest HTTP server on `$PORT`. REST and WS share one `ORIGIN`-driven CORS config in `src/common/cors.ts`; `ORIGIN` documented in `.env.example` and the README.
 - [x] **`ServerService.findChannelForMember`** — projects `{ _id: 1, 'channels.$': 1 }`, so one query returns the matched channel and the caller can check `type`. Returns `null` for a malformed id, an unknown channel, or a non-member. `isUserMemberOfChannelServer` is untouched; both now parse the id through `toObjectId` in `src/common/objectid.ts`.
-- [ ] **Voice module, P2P mesh** — `voice` namespace, presence keyed by socket behind a Redis-swappable interface, Cloudflare TURN credentials, membership gate only on `voice:join`.
-- [ ] **`OnGatewayDisconnect`** — nothing in the codebase implements it. Without it a closed tab leaves a ghost in the channel forever, and Cloud Run's 60-minute request cap makes that routine rather than rare.
+- [x] **Voice module, P2P mesh** — `voice` namespace, presence keyed by socket behind the `VOICE_PRESENCE_STORE` interface (Redis seam), Cloudflare TURN credentials with a static→Cloudflare→STUN fallback, one-way topology promotion past `meshMax`, and the membership gate on `voice:join` only — every later handler asserts `client.rooms.has(voiceRoom(...))` and never joins.
+- [x] **`OnGatewayDisconnect`** — `VoiceGateway` sweeps the disconnected socket out of the presence store, emits one `voice:peer-left` per channel it was in, and releases the topology when that empties a room; it swallows and logs its own errors, since the hook runs outside `WsGlobalExceptionFilter`. `ChatGateway` implements the hook too, but only records the departure: socket.io unwinds `user:<id>` and `channel:<id>` by itself, so it is the seam for **Online status via Redis**, not a cleanup path.
 - [ ] **Webcam / screenshare over the Cloudflare SFU** — with simulcast ladders split by `contentHint`, since text and motion want opposite tradeoffs. This is where the bandwidth bill actually lives; voice never approaches the free tier.
 
 ## Media
