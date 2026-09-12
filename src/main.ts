@@ -1,11 +1,20 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { httpCorsOptions } from './common/cors';
+import { envInt } from './common/env';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Quantos proxies confiáveis ficam na frente da app. O rate limit
+  // (`src/common/throttle.ts`) identifica o cliente por `req.ip`; sem isto ele
+  // seria o IP do proxy do Cloud Run, e todo usuário cairia no mesmo balde.
+  // Um número, não `true`: o Express pega a entrada do `X-Forwarded-For` a N
+  // saltos da direita — as da esquerda o próprio cliente pode forjar.
+  app.set('trust proxy', envInt(process.env.TRUST_PROXY_HOPS, 1));
 
   app.useGlobalPipes(new ValidationPipe({ transform: true }));
 

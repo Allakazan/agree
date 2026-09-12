@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { throttlerOptions } from './common/throttle';
 
 // Modules
 import { AppController } from './app.controller';
@@ -29,6 +32,7 @@ import voice from './config/voice';
         uri: configService.get<string>('database.mongodb.url'),
       }),
     }),
+    ThrottlerModule.forRoot(throttlerOptions),
     ServerModule,
     ChatModule,
     AuthModule,
@@ -36,6 +40,10 @@ import voice from './config/voice';
     VoiceModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // HTTP only — see `src/common/throttle.ts` for why gateways are exempt.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+  ],
 })
 export class AppModule {}

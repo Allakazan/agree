@@ -178,6 +178,7 @@ jobs:
         id: envs
         env:
           ORIGIN: ${{ vars.ORIGIN }}
+          TRUST_PROXY_HOPS: ${{ vars.TRUST_PROXY_HOPS }}
           VOICE_MESH_MAX: ${{ vars.VOICE_MESH_MAX }}
           VIDEO_MESH_MAX: ${{ vars.VIDEO_MESH_MAX }}
           VOICE_MAX_AUDIO_BITRATE: ${{ vars.VOICE_MAX_AUDIO_BITRATE }}
@@ -193,7 +194,7 @@ jobs:
           # `^@@^` troca o separador do gcloud: ORIGIN e STUN_URL são listas
           # separadas por vírgula e seriam quebradas pelo delimitador default.
           pairs="NODE_ENV=production"
-          for name in ORIGIN VOICE_MESH_MAX VIDEO_MESH_MAX VOICE_MAX_AUDIO_BITRATE \
+          for name in ORIGIN TRUST_PROXY_HOPS VOICE_MESH_MAX VIDEO_MESH_MAX VOICE_MAX_AUDIO_BITRATE \
                       VOICE_UPLINK_BUDGET TURN_URL TURN_USER CF_TURN_KEY_ID \
                       CF_TURN_TTL STUN_URL; do
             value="${!name:-}"

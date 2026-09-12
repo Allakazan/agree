@@ -1,4 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { AppService } from './app.service';
 import { Public } from './modules/auth/decorators/ispublic.decorator';
 
@@ -11,8 +12,10 @@ export class AppController {
     return this.appService.getHello();
   }
 
-  // Health check route
+  // Health check route. Unthrottled: agree-app polls it while waiting for the
+  // backend to come back, and a 429 there would read as "still down".
   @Public()
+  @SkipThrottle()
   @Get('health')
   getHealth(): { status: 'ok' } {
     return { status: 'ok' };
