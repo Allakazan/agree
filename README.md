@@ -32,8 +32,11 @@ A comunicação de chat em tempo real é feita via **Socket.IO** (`@nestjs/webso
    | `MONGODB_URI`  | Connection string do MongoDB (usado pelo Mongoose)             | `mongodb://root:1234@localhost:27017/agree?authSource=admin`    |
    | `JWT_SECRET`   | Segredo para assinar/validar os tokens JWT de autenticação     | *(defina um valor forte, ex.: `openssl rand -hex 32`)*          |
    | `ORIGIN`       | Origens liberadas no CORS (REST + WS), separadas por vírgula   | *(vazio = qualquer origem)*                                     |
+   | `TRUST_PROXY_HOPS` | Proxies confiáveis na frente da API; define qual entrada do `X-Forwarded-For` vira `req.ip` (usado pelo rate limit) | `1` |
 
    > Os WebSockets (`ChatGateway` no namespace `/chat`, `VoiceGateway` no `/voice`) são anexados ao servidor HTTP do Nest, ou seja, escutam na **mesma** porta da API (`PORT`) — o que separa os gateways são os namespaces, não portas. O CORS de REST e WS sai da mesma config em `src/common/cors.ts`: a lista do `ORIGIN` ou, se ele estiver vazio, qualquer origem. Nesse caso a origem é **refletida** (`origin: true`), não `*` — com `credentials: true`, o browser recusa o curinga em request credenciada, e o cookie `agree_token` é um dos caminhos de auth do WS.
+   >
+   > O REST tem rate limit por IP e por rota (`@nestjs/throttler`, limites em `src/common/throttle.ts`): 120 req/min por rota, e 10/min no `POST /auth/login`. Estourar devolve `429` com `Retry-After`. O `/health` não é limitado, e os WebSockets ainda não têm limite. A contagem fica em memória, ou seja, é por instância.
    >
    > O JWT expira em **7 dias** (`auth.module.ts`, `expiresIn: '7d'` — originalmente estava em 60s, aumentado a pedido para uso diário) e não há endpoint de refresh.
 

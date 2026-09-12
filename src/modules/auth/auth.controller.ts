@@ -11,6 +11,8 @@ import type { Response } from 'express';
 import { AuthService } from './auth.service';
 import { SignInDto } from './dto/signin.dto';
 import { ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
+import { loginThrottle } from 'src/common/throttle';
 import { Public } from './decorators/ispublic.decorator';
 import { User } from './decorators/user.decorator';
 import { LoggedUser } from './types/loggedUser.type';
@@ -36,6 +38,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @Post('login')
   @Public()
+  @Throttle(loginThrottle)
   async signIn(
     @Body() { login, password }: SignInDto,
     @Res({ passthrough: true }) res: Response,
