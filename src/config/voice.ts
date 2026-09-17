@@ -2,7 +2,7 @@ import { envInt, envList } from '../common/env';
 
 export type VoiceConfig = {
   meshMax: number;
-  videoMeshMax: number;
+  sfuMax: number;
   maxAudioBitrate: number;
   uplinkBudget: number;
   turn: {
@@ -16,12 +16,17 @@ export type VoiceConfig = {
     ttl: number;
   };
   stunUrls: string[];
+  sfu: {
+    appId?: string;
+    appSecret?: string;
+  };
 };
 
 /**
  * Voice tuning knobs. Every value has a working default so a dev `.env` needs
- * none of them — only the TURN settings change behaviour when absent, and
- * `voice.ice.service.ts` falls back to STUN-only without them.
+ * none of them — only the TURN and SFU settings change behaviour when absent:
+ * `voice.ice.service.ts` falls back to STUN-only, and without the SFU a room
+ * stays audio-only and is capped at `meshMax`.
  */
 export default (): { voice: VoiceConfig } => {
   const meshMax = envInt(process.env.VOICE_MESH_MAX, 5);
@@ -30,10 +35,11 @@ export default (): { voice: VoiceConfig } => {
 
   return {
     voice: {
-      // > this many participants ⇒ the room needs the SFU (Phase 2).
+      // > this many participants ⇒ the room moves onto the SFU.
       meshMax,
-      // > this many, once anyone publishes video ⇒ SFU. Unused until Phase 2.
-      videoMeshMax: envInt(process.env.VIDEO_MESH_MAX, 2),
+      // Hard cap on a room once it is on the SFU. Egress grows with every
+      // viewer of every video, so this bounds what one room can cost.
+      sfuMax: envInt(process.env.VOICE_SFU_MAX, 25),
       maxAudioBitrate,
       // What one client is assumed able to push in total. In a mesh a sender
       // encodes once per peer, so the per-peer ceiling divides this budget.
@@ -65,6 +71,16 @@ export default (): { voice: VoiceConfig } => {
       },
       /** Last resort when no TURN is configured: host/srflx candidates only. */
       stunUrls: stunUrls.length ? stunUrls : ['stun:stun.cloudflare.com:3478'],
+      /**
+       * Cloudflare Realtime SFU. Both or nothing: without them there is no video
+       * and no room past `meshMax`. The secret never leaves this process — every
+       * SFU call is proxied through the voice gateway, which is what lets it
+       * authorize who pulls what.
+       */
+      sfu: {
+        appId: process.env.CF_REALTIME_APP_ID || undefined,
+        appSecret: process.env.CF_REALTIME_APP_SECRET || undefined,
+      },
     },
   };
 };

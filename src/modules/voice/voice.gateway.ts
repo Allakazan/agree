@@ -27,20 +27,31 @@ import { ServerService } from '../server/server.service';
 import { VoiceJoinDto } from './dto/voice-join.dto';
 import { VoiceSignalDto } from './dto/voice-signal.dto';
 import { VoiceStateDto } from './dto/voice-state.dto';
+import { VoiceSfuPublishDto } from './dto/voice-sfu-publish.dto';
+import { VoiceSfuPullDto } from './dto/voice-sfu-pull.dto';
+import { VoiceSfuRenegotiateDto } from './dto/voice-sfu-renegotiate.dto';
+import { VoiceSfuCloseDto } from './dto/voice-sfu-close.dto';
+import { VoiceSfuLayerDto } from './dto/voice-sfu-layer.dto';
 import { VoiceIceService } from './voice.ice.service';
 import {
   VOICE_PRESENCE_STORE,
   VoicePresenceStore,
 } from './voice.presence.interface';
 import { voiceRoom } from './voice.rooms';
+import { sourceKind } from './voice.simulcast';
+import { SessionDescription } from './voice.sfu.client';
+import { VoiceSfuPullResult, VoiceSfuService } from './voice.sfu.service';
 import { VoiceTopologyService } from './voice.topology.service';
 import { VoiceJoinAck, VoiceParticipant } from './types/voice.types';
 
 /**
  * Signaling for voice channels. Media never touches this server — Cloud Run
- * carries no UDP, so a self-hosted SFU is impossible and audio goes
- * browser↔browser over a P2P mesh. All that flows through here is who is in a
- * channel and the SDP/ICE needed to connect them.
+ * carries no UDP, so a self-hosted SFU is impossible. A room starts as a P2P
+ * mesh (audio only, browser↔browser) and moves onto the Cloudflare Realtime
+ * SFU once it outgrows the mesh or anyone publishes video. All that flows
+ * through here is who is in a channel, the SDP/ICE to connect them on the
+ * mesh, and — on the SFU — every Cloudflare call, proxied so the app secret
+ * never reaches a client.
  *
  * No port argument, same as `ChatGateway`: the gateway attaches to the Nest
  * HTTP server on `$PORT`, and the `voice` namespace is what separates it from
@@ -66,6 +77,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly wsAuthService: WsAuthService,
     private readonly topologyService: VoiceTopologyService,
     private readonly iceService: VoiceIceService,
+    private readonly sfuService: VoiceSfuService,
     @Inject(VOICE_PRESENCE_STORE)
     private readonly presence: VoicePresenceStore,
   ) {}
@@ -151,21 +163,22 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // itself. The older socket goes, Discord-style.
     if (self) await this.evict(dto.channelId, self);
 
-    const occupants = await this.presence.countByChannel(dto.channelId);
-    const topology = this.topologyService.decideForJoin(
-      dto.channelId,
-      occupants + 1,
-    );
+    const count = (await this.presence.countByChannel(dto.channelId)) + 1;
 
-    if (topology !== 'mesh') {
-      // Phase 2 answers this by promoting the room onto the Cloudflare SFU and
-      // emitting `voice:topology-changed`. Until that exists, a room past the
-      // mesh limit has nowhere to put the extra streams, and saying so beats
-      // silently degrading everyone's audio.
+    // Without the SFU the capacity is the mesh limit: past it there is nowhere
+    // to put the extra streams, and saying so beats silently degrading
+    // everyone's audio. With it, `sfuMax` bounds what one room can cost.
+    if (count > this.topologyService.capacity) {
       throw new BadRequestException(
-        `This voice channel is full (${this.topologyService.meshMax} participants)`,
+        `This voice channel is full (${this.topologyService.capacity} participants)`,
       );
     }
+
+    // Decided now, applied only once the join can no longer fail — a refused
+    // join must not leave the room marked as promoted.
+    const promote =
+      this.topologyService.current(dto.channelId) === 'mesh' &&
+      this.topologyService.needsSfu(count);
 
     // Fetched before any state is mutated: it is the one step that talks to the
     // outside world, and a failure here should leave nothing half-joined.
@@ -181,23 +194,30 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       muted: false,
       deafened: false,
       joinedAt: new Date().toISOString(),
+      tracks: [],
     });
+
+    if (promote) this.announcePromotion(dto.channelId, client);
 
     client
       .to(room)
       .emit('voice:peer-joined', { channelId: dto.channelId, participant });
+
+    const topology = this.topologyService.current(dto.channelId);
 
     return {
       channelId: dto.channelId,
       selfId: user.sub,
       socketId: client.id,
       topology,
-      // Everyone already here. The newcomer offers to each of them and they
-      // only answer — that convention is what keeps a simultaneous-offer race,
-      // and the rollback logic to resolve it, out of the protocol.
+      // Everyone already here. On the mesh the newcomer offers to each of them
+      // and they only answer — that convention is what keeps a
+      // simultaneous-offer race, and the rollback logic to resolve it, out of
+      // the protocol. On the SFU their `tracks` are what to pull.
       participants,
       iceServers,
-      bitrate: this.topologyService.bitrateFor(participants.length + 1),
+      bitrate: this.topologyService.bitrateFor(count, topology),
+      video: this.topologyService.videoPolicy(),
     };
   }
 
@@ -228,6 +248,14 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @User() user: LoggedUser,
   ): Promise<{ status: string }> {
     this.assertInRoom(client, dto.channelId);
+
+    // A client that only speaks mesh (or missed `voice:topology-changed`)
+    // must not keep running P2P in a room that has outgrown it.
+    if (this.topologyService.current(dto.channelId) === 'sfu') {
+      throw new BadRequestException(
+        'This voice channel is on the media server, not peer to peer',
+      );
+    }
 
     if (dto.targetUserId === user.sub) {
       throw new BadRequestException('Cannot signal yourself');
@@ -280,6 +308,155 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   /**
+   * Publishes local tracks to the SFU. On a mesh room this is also how video
+   * arrives: the first video publisher takes the whole room onto the SFU,
+   * since one room never runs two transports.
+   *
+   * The SFU call happens *before* the promotion, so a publish Cloudflare
+   * refuses leaves the room on the mesh rather than migrating everyone for
+   * nothing.
+   */
+  @SubscribeMessage('voice:sfu:publish')
+  async handleSfuPublish(
+    @MessageBody(new WsValidationPipe()) dto: VoiceSfuPublishDto,
+    @ConnectedSocket() client: Socket,
+    @User() user: LoggedUser,
+  ): Promise<{
+    sessionDescription: SessionDescription;
+    tracks: { mid: string; trackName: string }[];
+  }> {
+    this.assertInRoom(client, dto.channelId);
+
+    const onMesh = this.topologyService.current(dto.channelId) === 'mesh';
+
+    if (onMesh) {
+      const video = dto.tracks.some(
+        (track) => sourceKind(track.source) === 'video',
+      );
+      const count = await this.presence.countByChannel(dto.channelId);
+
+      if (!this.topologyService.needsSfu(count, video)) {
+        throw new BadRequestException(
+          'This voice channel is peer to peer; audio goes over voice:signal',
+        );
+      }
+
+      if (!this.topologyService.sfuEnabled) {
+        throw new BadRequestException('Video is not available on this server');
+      }
+    }
+
+    const result = await this.sfuService.publish(
+      dto.channelId,
+      client.id,
+      dto.sessionDescription,
+      dto.tracks,
+    );
+
+    if (onMesh) this.announcePromotion(dto.channelId);
+
+    for (const { track } of result.tracks) {
+      client.to(voiceRoom(dto.channelId)).emit('voice:track-published', {
+        channelId: dto.channelId,
+        userId: user.sub,
+        track,
+      });
+    }
+
+    return {
+      sessionDescription: result.sessionDescription,
+      tracks: result.tracks.map(({ mid, track }) => ({
+        mid,
+        trackName: track.trackName,
+      })),
+    };
+  }
+
+  /** Receives other participants' tracks, batched into one negotiation. */
+  @SubscribeMessage('voice:sfu:pull')
+  async handleSfuPull(
+    @MessageBody(new WsValidationPipe()) dto: VoiceSfuPullDto,
+    @ConnectedSocket() client: Socket,
+  ): Promise<VoiceSfuPullResult> {
+    this.assertOnSfu(client, dto.channelId);
+
+    return this.sfuService.pull(dto.channelId, client.id, dto.tracks);
+  }
+
+  /** Completes a negotiation Cloudflare started with a pull or a close. */
+  @SubscribeMessage('voice:sfu:renegotiate')
+  async handleSfuRenegotiate(
+    @MessageBody(new WsValidationPipe()) dto: VoiceSfuRenegotiateDto,
+    @ConnectedSocket() client: Socket,
+  ): Promise<{ status: string }> {
+    this.assertOnSfu(client, dto.channelId);
+
+    await this.sfuService.renegotiate(
+      dto.channelId,
+      client.id,
+      dto.sessionDescription,
+    );
+
+    return { status: 'renegotiated' };
+  }
+
+  /**
+   * Closes tracks on the caller's session, published and pulled alike, always
+   * with the client's offer. Closing a published one takes it off the room —
+   * which is also how a camera is turned off: Cloudflare drops a track after
+   * 30s without packets, but presence would keep announcing it.
+   */
+  @SubscribeMessage('voice:sfu:close')
+  async handleSfuClose(
+    @MessageBody(new WsValidationPipe()) dto: VoiceSfuCloseDto,
+    @ConnectedSocket() client: Socket,
+    @User() user: LoggedUser,
+  ): Promise<{
+    sessionDescription?: SessionDescription;
+    requiresImmediateRenegotiation: boolean;
+  }> {
+    this.assertOnSfu(client, dto.channelId);
+
+    const result = await this.sfuService.close(
+      dto.channelId,
+      client.id,
+      dto.mids,
+      dto.sessionDescription,
+    );
+
+    for (const trackName of result.unpublished) {
+      client.to(voiceRoom(dto.channelId)).emit('voice:track-unpublished', {
+        channelId: dto.channelId,
+        userId: user.sub,
+        trackName,
+      });
+    }
+
+    return {
+      sessionDescription: result.sessionDescription,
+      requiresImmediateRenegotiation: result.requiresImmediateRenegotiation,
+    };
+  }
+
+  /** Switches a pulled video track to another simulcast layer. */
+  @SubscribeMessage('voice:sfu:layer')
+  async handleSfuLayer(
+    @MessageBody(new WsValidationPipe()) dto: VoiceSfuLayerDto,
+    @ConnectedSocket() client: Socket,
+  ): Promise<{ status: string; mid: string; preferredRid: string }> {
+    this.assertOnSfu(client, dto.channelId);
+
+    await this.sfuService.setLayer(
+      dto.channelId,
+      client.id,
+      dto.mid,
+      dto.preferredRid,
+    );
+
+    return { status: 'updated', mid: dto.mid, preferredRid: dto.preferredRid };
+  }
+
+  /**
    * Presence in the room is the authorization for every handler after join.
    * Note what this deliberately does *not* do: join the socket. Repairing
    * membership here would grant the room to whoever asked for it.
@@ -287,6 +464,36 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private assertInRoom(client: Socket, channelId: string): void {
     if (!client.rooms.has(voiceRoom(channelId))) {
       throw new BadRequestException('Join this voice channel first');
+    }
+  }
+
+  /** `assertInRoom`, plus the room must already be on the SFU. */
+  private assertOnSfu(client: Socket, channelId: string): void {
+    this.assertInRoom(client, channelId);
+
+    if (this.topologyService.current(channelId) !== 'sfu') {
+      throw new BadRequestException(
+        'This voice channel is not on the media server',
+      );
+    }
+  }
+
+  /**
+   * Moves a room onto the SFU and tells everyone in it to migrate — once: a
+   * room already promoted stays silent. `except` is a joiner, who learns the
+   * topology from its own ack instead.
+   */
+  private announcePromotion(channelId: string, except?: Socket): void {
+    if (!this.topologyService.promote(channelId)) return;
+
+    const payload = { channelId, topology: 'sfu' as const };
+
+    if (except) {
+      except.to(voiceRoom(channelId)).emit('voice:topology-changed', payload);
+    } else {
+      this.server
+        .to(voiceRoom(channelId))
+        .emit('voice:topology-changed', payload);
     }
   }
 
@@ -341,15 +548,20 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const participants = (await this.presence.listByChannel(channelId)).filter(
       (participant) => participant.socketId !== self.socketId,
     );
+    const topology = this.topologyService.current(channelId);
 
     return {
       channelId,
       selfId: user.sub,
       socketId: client.id,
-      topology: this.topologyService.current(channelId),
+      topology,
       participants,
       iceServers: await this.iceService.getIceServers(),
-      bitrate: this.topologyService.bitrateFor(participants.length + 1),
+      bitrate: this.topologyService.bitrateFor(
+        participants.length + 1,
+        topology,
+      ),
+      video: this.topologyService.videoPolicy(),
     };
   }
 }

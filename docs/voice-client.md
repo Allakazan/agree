@@ -1,8 +1,10 @@
-# Voz no front — guia de implementação (Fase 1, mesh P2P)
+# Voz no front — guia de implementação (mesh P2P + SFU)
 
 Este documento é o contrato entre o front e o módulo `voice` do backend. O
 desenho e as razões por trás dele estão em [voice-webrtc.md](./voice-webrtc.md);
-aqui só está o que o cliente precisa fazer.
+aqui só está o que o cliente precisa fazer. As seções até "Endpoint REST" são a
+Fase 1 (mesh, só áudio) e continuam valendo; o que muda quando a sala vai para o
+SFU está em [Fase 2 — SFU](#fase-2--sfu-vídeo-screenshare-e-salas-grandes).
 
 ## O que o servidor faz — e o que ele não faz
 
@@ -20,8 +22,10 @@ Consequências práticas para o front:
 - Mute/deafen são **cosméticos** no servidor — ele guarda o flag só para quem
   entrar depois renderizar o ícone certo. Silenciar de verdade é responsabilidade
   do cliente (`track.enabled = false`).
-- Fase 1 é **só áudio** e **no máximo 5 participantes** por canal (`VOICE_MESH_MAX`).
-  O 6º recebe erro no join. Vídeo e screenshare são Fase 2.
+- O mesh é **só áudio** e vai até **5 participantes** (`VOICE_MESH_MAX`). Com
+  o SFU configurado no backend, o 6º não é recusado: a sala inteira migra para o
+  SFU. Vídeo e screenshare **sempre** vão pelo SFU. Sem SFU configurado
+  (`ack.video === null`), o 6º recebe erro no join e não há vídeo.
 
 ---
 
@@ -96,6 +100,20 @@ type VoiceParticipant = {
   muted: boolean;
   deafened: boolean;
   joinedAt: string; // ISO8601 — dá pra ordenar o roster por chegada
+  tracks: VoiceTrack[]; // o que ele publica no SFU; sempre [] no mesh
+};
+
+type VoiceTrack = {
+  trackName: 'mic' | 'camera' | 'screen' | 'screen-audio'; // = source
+  source: 'mic' | 'camera' | 'screen' | 'screen-audio';
+  kind: 'audio' | 'video';
+  contentHint?: 'detail' | 'motion'; // só screen
+  rids: ('f' | 'h' | 'q')[]; // camadas de simulcast, melhor primeiro; [] no áudio
+};
+
+type SimulcastProfile = {
+  capture: { width: number; height: number; frameRate: number };
+  encodings: { rid: 'f' | 'h' | 'q'; maxBitrate: number; maxFramerate: number; scaleResolutionDownBy: number }[];
 };
 
 type IceServer = {
@@ -108,10 +126,15 @@ type VoiceJoinAck = {
   channelId: string;
   selfId: string;    // seu userId — é por ele que os peers te endereçam
   socketId: string;
-  topology: 'mesh' | 'sfu'; // sempre 'mesh' na Fase 1
+  topology: 'mesh' | 'sfu';
   participants: VoiceParticipant[]; // quem JÁ estava lá, sem você
   iceServers: IceServer[];
   bitrate: { audio: { maxBitrate: number } };
+  // null = backend sem SFU: sem vídeo, sala enche em VOICE_MESH_MAX
+  video: {
+    codecs: string[]; // ['VP8'] — restrinja a offer a isso
+    profiles: { camera: SimulcastProfile; screenDetail: SimulcastProfile; screenMotion: SimulcastProfile };
+  } | null;
 };
 ```
 
@@ -135,10 +158,12 @@ E escute `error` em paralelo:
 socket.on('error', (e: { status: string; message: string }) => {
   // "You are not a member of this channel's server"
   // "This channel is not a voice channel"
-  // "This voice channel is full (5 participants)"
+  // "This voice channel is full (5 participants)"   (25 com SFU: VOICE_SFU_MAX)
   // "Join this voice channel first"
   // "That peer is not in this voice channel"
+  // "This voice channel is on the media server, not peer to peer"  → voice:signal numa sala SFU
   // "Unauthorized"  → o socket também será desconectado
+  // ...e os do SFU, listados na seção da Fase 2
 });
 ```
 
@@ -417,9 +442,238 @@ server-wide (ver "Open decisions" no doc de design).
 - **`targetUserId` é userId, não socketId.** Peers se endereçam por usuário; o
   servidor resolve para o socket certo — inclusive para não vazar a negociação
   para outras abas daquele usuário.
-- **`topology` sempre vem `'mesh'`.** O campo existe para a Fase 2; se um dia
-  vier `'sfu'`, o cliente antigo precisa falhar explicitamente em vez de assumir
-  mesh.
+- **Cheque `topology` no ack.** Com SFU configurado no backend ela pode vir
+  `'sfu'` já no join (o 6º a entrar, ou uma sala com vídeo). Um cliente que só
+  fala mesh precisa falhar explicitamente — o servidor recusa `voice:signal`
+  numa sala SFU, então assumir mesh deixa a chamada muda.
+
+## Fase 2 — SFU (vídeo, screenshare e salas grandes)
+
+Só existe se o backend tiver `CF_REALTIME_APP_ID`/`CF_REALTIME_APP_SECRET` —
+o sinal para o front é `ack.video !== null`. Sem isso, esconda câmera e
+screenshare.
+
+### O que muda
+
+No SFU cada cliente tem **um** `RTCPeerConnection`, com a Cloudflare do outro
+lado, e não com cada peer. Você **publica** suas tracks nele e **puxa** as dos
+outros. O backend faz de proxy para toda chamada à Cloudflare (o secret do app
+nunca chega no browser), então todo passo é um evento no socket `/voice`, com
+ack, como no mesh.
+
+A sala vai para o SFU quando:
+- entra o 6º participante (o ack vem `topology: 'sfu'`, e quem já estava recebe
+  `voice:topology-changed`); ou
+- alguém liga câmera/screenshare numa sala mesh (quem publicou vídeo recebe
+  `voice:topology-changed` também).
+
+É **só num sentido**: a sala só volta para mesh quando esvazia.
+
+### Eventos
+
+Cliente → servidor (todos exigem já ter feito `voice:join`):
+
+| Evento | Payload | Ack |
+| --- | --- | --- |
+| `voice:sfu:publish` | `{ channelId, sessionDescription: offer, tracks: [{ mid, source, contentHint? }] }` | `{ sessionDescription: answer, tracks: [{ mid, trackName }] }` |
+| `voice:sfu:pull` | `{ channelId, tracks: [{ userId, trackName, preferredRid? }] }` (até 64) | `{ sessionDescription?: offer, requiresImmediateRenegotiation, tracks: [{ mid, userId, trackName }] }` |
+| `voice:sfu:renegotiate` | `{ channelId, sessionDescription: answer }` | `{ status: 'renegotiated' }` |
+| `voice:sfu:close` | `{ channelId, mids: string[], sessionDescription: offer }` (offer **obrigatória**) | `{ sessionDescription?, requiresImmediateRenegotiation }` |
+| `voice:sfu:layer` | `{ channelId, mid, preferredRid }` | `{ status: 'updated', mid, preferredRid }` |
+
+Servidor → cliente:
+
+| Evento | Payload | O que fazer |
+| --- | --- | --- |
+| `voice:topology-changed` | `{ channelId, topology: 'sfu' }` | Migrar (ver abaixo). |
+| `voice:track-published` | `{ channelId, userId, track: VoiceTrack }` | Puxar (áudio sempre; vídeo quando o tile estiver visível). |
+| `voice:track-unpublished` | `{ channelId, userId, trackName }` | `voice:sfu:close` no mid que você puxou dessa track, e remover o tile. |
+| `voice:peer-left` | (igual ao mesh) | Fechar **todos** os mids que você puxou desse `userId`. |
+
+`source` ∈ `mic | camera | screen | screen-audio`. Cada participante publica
+**no máximo uma track por source**. `contentHint` é obrigatório no `screen`:
+`'detail'` para texto/código, `'motion'` para vídeo/jogo. As tracks são
+endereçadas por `{ userId, trackName }` — você nunca vê um id de sessão da
+Cloudflare.
+
+### Regra de ouro: uma negociação por vez
+
+Publish, pull e close mexem no **mesmo** PC. Se dois se cruzarem (offer sua
+enquanto a Cloudflare te manda outra), o PC entra em `have-local-offer` com uma
+offer remota chegando e quebra. Ponha tudo numa fila:
+
+```ts
+private queue = Promise.resolve();
+private negotiate<T>(step: () => Promise<T>): Promise<T> {
+  const run = this.queue.then(step, step);
+  this.queue = run.then(() => undefined, () => undefined);
+  return run;
+}
+```
+
+### Publicar (mic, câmera, screenshare)
+
+O servidor **inspeciona a offer** e recusa se ela não bater com a política:
+- vídeo só **VP8**, áudio só **Opus** — a offer não pode nem *oferecer* outros
+  (rtx/red/ulpfec são tolerados). Use `setCodecPreferences`;
+- o vídeo precisa declarar simulcast com **exatamente** as camadas do perfil
+  (`camera` e `screenMotion`: `f;h;q`; `screenDetail`: `f;h`). Use as
+  `encodings` do ack como `sendEncodings`.
+
+```ts
+const AUX = ['rtx', 'red', 'ulpfec', 'flexfec-03'];
+
+function restrictCodecs(t: RTCRtpTransceiver, kind: 'audio' | 'video', allowed: string[]) {
+  const ok = allowed.map((c) => c.toLowerCase());
+  const codecs = RTCRtpReceiver.getCapabilities(kind)!.codecs.filter((c) => {
+    const name = c.mimeType.split('/')[1].toLowerCase();
+    return ok.includes(name) || AUX.includes(name);
+  });
+  t.setCodecPreferences(codecs);
+}
+
+async publish(sources: { track: MediaStreamTrack; source: Source; contentHint?: 'detail' | 'motion' }[]) {
+  return this.negotiate(async () => {
+    const added = sources.map(({ track, source, contentHint }) => {
+      const video = track.kind === 'video';
+      const profile = source === 'camera' ? 'camera'
+        : contentHint === 'motion' ? 'screenMotion' : 'screenDetail';
+      if (source === 'screen') track.contentHint = contentHint!;
+
+      const t = this.pc.addTransceiver(track, {
+        direction: 'sendonly',
+        ...(video ? { sendEncodings: this.video!.profiles[profile].encodings } : {}),
+      });
+      restrictCodecs(t, track.kind as 'audio' | 'video', video ? this.video!.codecs : ['opus']);
+      return { t, source, contentHint };
+    });
+
+    await this.pc.setLocalDescription(await this.pc.createOffer());
+
+    // O mid só existe DEPOIS do setLocalDescription.
+    const ack = await this.socket.timeout(10_000).emitWithAck('voice:sfu:publish', {
+      channelId: this.channelId,
+      sessionDescription: this.pc.localDescription,
+      tracks: added.map(({ t, source, contentHint }) => ({
+        mid: t.mid, source, ...(source === 'screen' ? { contentHint } : {}),
+      })),
+    });
+
+    await this.pc.setRemoteDescription(ack.sessionDescription);
+    return ack.tracks; // guarde mid → source, para o close depois
+  });
+}
+```
+
+Capture com as constraints do perfil
+(`getUserMedia({ video: profiles.camera.capture })`,
+`getDisplayMedia({ video: profiles.screenDetail.capture })`) — as camadas
+(`scaleResolutionDownBy`) são relativas ao que foi capturado.
+
+Os `maxBitrate` das camadas são uma **política**: o servidor não consegue
+verificá-los (não aparecem no SDP), mas aplique como vieram.
+
+### Puxar
+
+```ts
+async pull(wanted: { userId: string; trackName: string; preferredRid?: 'f' | 'h' | 'q' }[]) {
+  return this.negotiate(async () => {
+    const ack = await this.socket.timeout(10_000).emitWithAck('voice:sfu:pull', {
+      channelId: this.channelId, tracks: wanted,
+    });
+
+    if (ack.requiresImmediateRenegotiation) {
+      await this.pc.setRemoteDescription(ack.sessionDescription);
+      await this.pc.setLocalDescription(await this.pc.createAnswer());
+      await this.socket.timeout(10_000).emitWithAck('voice:sfu:renegotiate', {
+        channelId: this.channelId, sessionDescription: this.pc.localDescription,
+      });
+    }
+
+    // ack.tracks[i].mid → this.pc.getTransceivers().find(t => t.mid === mid)!.receiver.track
+    return ack.tracks;
+  });
+}
+```
+
+- Sem `preferredRid`, o vídeo vem na camada **mais barata** (`q`, ou `h` num
+  screen `detail`). Peça mais pelo tamanho do tile.
+- Puxar a mesma track duas vezes é recusado — guarde o que você já puxou.
+- Um `preferredRid` que a track não tem é recusado: consulte `track.rids`.
+
+### Trocar de camada
+
+Ao redimensionar um tile (com throttle — não a cada frame de resize):
+
+```ts
+void this.socket.timeout(5_000).emitWithAck('voice:sfu:layer', { channelId, mid, preferredRid });
+```
+
+Sugestão para câmera: altura renderizada ≥ 540px → `f`, ≥ 270px → `h`, senão
+`q`. Para screenshare `detail`, `f` quando o tile é o foco e `h` na grade. A
+Cloudflare continua baixando a camada sozinha sob congestionamento.
+
+### Desligar câmera / parar screenshare
+
+**Feche a track no servidor**, não basta `track.stop()`. A Cloudflare descarta
+uma track 30 s depois que os pacotes param, mas a presença continuaria
+anunciando uma track morta para todo mundo.
+
+```ts
+await this.negotiate(async () => {
+  const mid = transceiver.mid; // leia antes do stop
+  transceiver.stop();
+  await this.pc.setLocalDescription(await this.pc.createOffer());
+  const ack = await this.socket.timeout(10_000).emitWithAck('voice:sfu:close', {
+    channelId, mids: [mid], sessionDescription: this.pc.localDescription,
+  });
+  if (ack.sessionDescription) await this.pc.setRemoteDescription(ack.sessionDescription);
+});
+```
+
+**Fechar um pull** (de um peer que saiu, `peer-left` / `track-unpublished`) é o
+**mesmo fluxo**: `transceiver.stop()` nos transceivers recvonly desses mids,
+offer e `voice:sfu:close` com ela. Dá para fechar vários mids numa offer só.
+Não existe close sem offer: o servidor recusa um `close` sem
+`sessionDescription`. A Cloudflare tem um modo `force` (corta o fluxo sem
+renegociar), mas ele deixaria um transceiver morto no seu PC, então o
+contrato tem um close só.
+
+### Migração (`voice:topology-changed`)
+
+1. Feche todos os `RTCPeerConnection` do mesh e remova os `<audio>` deles.
+2. Crie o PC do SFU com os `iceServers` que você já tem — ou reaproveite, se foi
+   você quem ligou o vídeo e disparou a promoção.
+3. Publique o mic (`source: 'mic'`).
+4. Puxe o `mic` (e o vídeo visível) de todo participante do roster cujo
+   `tracks` já tenha algo; o resto chega por `voice:track-published`.
+
+Há um corte de áudio de ~1 s na migração. Ele acontece uma vez só por sala.
+
+Quem entra numa sala que **já** está no SFU faz os passos 2–4 direto a partir
+do ack, sem mesh e sem oferecer para ninguém.
+
+### Erros do SFU
+
+Todos chegam pelo evento `error`, como no mesh:
+
+```
+"This voice channel is peer to peer; audio goes over voice:signal"   → publish só de áudio numa sala mesh
+"Video is not available on this server"                             → backend sem SFU
+"This voice channel is not on the media server"                      → pull/close/layer numa sala mesh
+"A camera track must offer only VP8 (got vp8, vp9, h264)"             → faltou setCodecPreferences
+"A screen track must simulcast exactly f;h (got f;h;q)"               → sendEncodings errado para o perfil
+"A camera track must be video, but mid 0 is audio"
+"The offer has no media section for mid 3"
+"You are already publishing a camera track"
+"Cannot pull your own track"
+"That peer is not publishing camera"
+"You are already receiving camera from that peer"
+"Layer q is not available on that track (f, h)"
+"Unknown track mid 9"
+"You have no media session yet"                                       → close/layer/renegotiate antes de publish/pull
+"The media server rejected the request"                               → a Cloudflare recusou; detalhe só no log do servidor
+```
 
 ## Roteiro de teste
 
@@ -430,5 +684,11 @@ server-wide (ver "Open decisions" no doc de design).
 4. Terceira aba com a **mesma** conta da primeira → a primeira recebe
    `voice:evicted` e cai.
 5. Canal `TEXT` → `error` com "This channel is not a voice channel".
-6. 6º participante → `error` com "This voice channel is full (5 participants)".
+6. 6º participante → sem SFU, `error` com "This voice channel is full (5
+   participants)"; com SFU, os 5 recebem `voice:topology-changed` e o áudio volta
+   em ~1 s pelo SFU.
 7. `iceTransportPolicy: 'relay'` → ainda conecta (prova o TURN).
+8. (SFU) Ligar câmera numa sala mesh de 2 → a sala migra e o outro vê o vídeo.
+9. (SFU) Screenshare `detail` num tile pequeno → chega em `h`; tile em foco →
+   `voice:sfu:layer` para `f`.
+10. (SFU) Desligar câmera → a outra aba recebe `voice:track-unpublished` na hora.

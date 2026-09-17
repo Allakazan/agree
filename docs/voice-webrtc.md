@@ -25,9 +25,11 @@ One topology **per room**, not per media kind. Two independent thresholds would 
 
 ```ts
 const useSfu =
-  participants > VOICE_MESH_MAX ||                       // default 5
-  (hasVideoPublisher && participants > VIDEO_MESH_MAX);   // default 2
+  participants > VOICE_MESH_MAX ||   // default 5
+  hasVideoPublisher;                 // video never runs on the mesh
 ```
+
+Video has no mesh threshold of its own. An earlier draft had `VIDEO_MESH_MAX = 2` (a 1:1 video call staying P2P), but adding video to an already-open mesh connection means the peer who was *already there* has to renegotiate — which breaks the "newcomer offers, existing peers only answer" rule and drags perfect negotiation (polite/impolite peers, rollback) into the client. So the first video publisher promotes the whole room, and the mesh stays audio-only.
 
 **Promotion is one-way.** A room that goes SFU stays SFU until it empties. Without this, a room oscillating at the threshold (5↔6 people) renegotiates every join/leave, and every transition is an audible glitch. One-way promotion also deletes the harder half of the migration state machine.
 
@@ -177,15 +179,67 @@ Follow the pattern in `chat.gateway.spec.ts`: `.overrideGuard(AuthGuard).useValu
 
 ---
 
-## Phase 2 — video, screenshare, and the Cloudflare SFU
+## Phase 2 — video, screenshare, and the Cloudflare SFU ✅ Done
 
-Phase 1's gateway, presence, rooms, and auth are unchanged. What gets added:
+Phase 1's gateway, presence, rooms, and auth are unchanged. Everything below is **off unless `CF_REALTIME_APP_ID` and `CF_REALTIME_APP_SECRET` are both set** — without them the module behaves exactly as in Phase 1 (audio-only mesh, room full at `VOICE_MESH_MAX`), which is what lets the backend ship before the client does.
 
-**`voice.sfu.service.ts`** wraps the Cloudflare Realtime SFU API (create session, push track, pull track). The gateway keeps relaying, but in SFU mode it relays *to Cloudflare* instead of between peers.
+API checked against Cloudflare's OpenAPI (`realtime-api-2024-05-21.yaml`): `https://rtc.live.cloudflare.com/v1/apps/{appId}`, `Authorization: Bearer <appSecret>`, endpoints `sessions/new`, `sessions/{id}/tracks/new` (push = `location: 'local'`, pull = `location: 'remote'` + `sessionId` + `trackName`), `renegotiate`, `tracks/close` and `tracks/update`. Errors come back at the top level **and per track**, with HTTP 200 — a status check alone misses them.
 
-**Migration.** When `voice.topology.service.ts` flips a room to SFU, the server emits `voice:topology-changed`; clients tear down mesh `RTCPeerConnection`s and re-publish to the SFU. One-way only (see above), so there is no demotion path to write.
+### The secret never leaves the server
 
-**Simulcast.** Confirmed supported by Cloudflare, with automatic bandwidth-based layer switching *and* manual control when pulling a track (`preferredRid`, `priorityOrdering`, `ridNotAvailable`). RIDs must be `f` / `h` / `q`.
+Every SFU call is proxied through the gateway; the app secret lives only in `CloudflareSfuClient`. That is what makes the SFU authorizable at all — a client holding the secret could open sessions and pull any track in the app directly.
+
+- A participant's Cloudflare `sessionId` is stored in presence **beside** the `VoiceParticipant`, never on it (`VoiceSfuState`), so nothing that broadcasts a participant can leak it. Clients never send one either.
+- A pull names a publisher by **user id** and a track by **name**; the server resolves the publisher through presence, the same way `voice:signal` resolves `targetUserId`. Presence in the room remains the authorization: you can only pull from someone in `voice:<channelId>`.
+- `trackName` is server-chosen (= the source: `mic`, `camera`, `screen`, `screen-audio`), one track per source per participant.
+- The membership gate stays on `voice:join` alone; every SFU handler asserts room membership and never calls `join()`.
+
+### Layout
+
+| File | Role |
+| --- | --- |
+| `voice.sfu.client.ts` | `CloudflareSfuClient` — one method per endpoint, plain `fetch`, no policy. **Throws** (unlike `VoiceIceService`): a failed publish has no degraded mode. |
+| `voice.sfu.service.ts` | `VoiceSfuService` — authorizes pulls through presence, opens sessions lazily, dedupes pulls, validates publishes, serializes each socket's calls. Cloudflare errors reach the client as one generic message; the detail goes to the log. |
+| `voice.sdp.ts` | Read-only SDP inspection for publish offers. |
+| `voice.simulcast.ts` | The codec allowlist and the simulcast ladders — a policy table, not env knobs. |
+
+Calls for one socket are serialized (a promise chain per socket): each operation is a read-modify-write of that socket's SFU state around an HTTP call, and a publish and a pull fired together would otherwise each write back a state missing the other's mids. Per-process, like presence.
+
+### Protocol
+
+Client → server, all acked, all behind `assertInRoom`:
+
+| Event | Payload | Behaviour |
+| --- | --- | --- |
+| `voice:sfu:publish` | `{ channelId, sessionDescription: offer, tracks: [{ mid, source, contentHint? }] }` | Validates the offer, opens the session lazily, `tracks/new` local, records the tracks, broadcasts `voice:track-published`. On a mesh room with video it **promotes** the room — after the Cloudflare call, so a refused publish leaves the room on the mesh. An audio-only publish on a mesh room is refused. |
+| `voice:sfu:pull` | `{ channelId, tracks: [{ userId, trackName, preferredRid? }] }` | Batched (≤ 64, Cloudflare's per-call limit). Refuses your own track, a publisher not in the room, a track not published, a track already pulled, a layer the track lacks. Video defaults to the **cheapest** layer. Acks Cloudflare's offer. |
+| `voice:sfu:renegotiate` | `{ channelId, sessionDescription: answer }` | Completes a negotiation Cloudflare started. |
+| `voice:sfu:close` | `{ channelId, mids[], sessionDescription: offer }` | Closes mids on the caller's own session, pulled and published alike. Published ones are unpublished (`voice:track-unpublished`). The offer is **required**, and Cloudflare gets `{ tracks, sessionDescription, force: false }`. Checked against the live API, which disagrees with its OpenAPI: `force` is **required** (without it: `400 decoding_error ... force`), and `force: false` needs the offer (`406 sessionDescription must be present`). `force: true` alone would pass, but it only stops the data flow and leaves a dead transceiver on the client, so the contract has one close only. A forced close would also leave a dead transceiver on the client. |
+| `voice:sfu:layer` | `{ channelId, mid, preferredRid }` | `tracks/update` on a pulled video track. |
+
+Server → client: `voice:topology-changed { channelId, topology: 'sfu' }`, `voice:track-published { channelId, userId, track }`, `voice:track-unpublished { channelId, userId, trackName }`.
+
+Changes to Phase 1 events: `voice:join` past `meshMax` now promotes instead of refusing (the ack says `topology: 'sfu'`; existing members get `topology-changed`), capped at `VOICE_SFU_MAX`; participants carry `tracks`; the ack carries `video` (`null` without an SFU). `voice:signal` is refused in an `sfu` room, so a mesh-only client cannot keep running P2P past the limit.
+
+`leave`, `disconnect` and eviction make **no Cloudflare calls**: presence drops the session and tracks, `peer-left` tells pullers to close theirs, and Cloudflare garbage-collects a track 30 s after its packets stop. A publisher nobody pulls costs no egress. `handleDisconnect` stays free of outside I/O.
+
+### Migration
+
+On `voice:topology-changed` a client closes its mesh `RTCPeerConnection`s, opens **one** PC for the SFU (or reuses it, if it was the video publisher that triggered the promotion), publishes its mic and pulls what the roster shows, converging afterwards through `track-published`. One-way only (see above), so there is no demotion path to write. A client must serialize negotiations on that PC — publish, pull and close each complete before the next.
+
+### What the server can and cannot enforce
+
+| | Decided by | The server can… |
+| --- | --- | --- |
+| Send bitrate | The browser (`sendEncodings` / `setParameters`) | **Publish** a ceiling. Not verify it: `maxBitrate` never reaches the SDP, and Cloudflare enforces no bitrate cap. A modified client can ignore it. |
+| Egress — the bill | The server | **Enforce**: which layer each puller gets, one pull per publisher track, and `VOICE_SFU_MAX` per room. |
+| Codec | The client offers (narrowed with `setCodecPreferences`); Cloudflare answers from the offer | **Validate**: publish offers pass through the server anyway. |
+
+The publish offer is inspected, never rewritten (no munging, as in Phase 1). For each declared `mid` the matching m-section must: be the right kind (`audio` for `mic`/`screen-audio`, `video` for `camera`/`screen`); carry **only** allowed primary codecs — VP8 for video, Opus for audio, with `rtx`/`red`/`ulpfec`/`flexfec`/CN/DTMF ignored — which leaves Cloudflare's answer no other choice; and, for video, declare in `a=simulcast:send` exactly the rids of its ladder. Cloudflare itself takes H264/H265/VP8/VP9/AV1 and Opus/G.711; VP8 is our choice because its simulcast works in every browser, while VP9 and AV1 lean on SVC and are costly to encode.
+
+### Simulcast
+
+Supported by Cloudflare, with automatic bandwidth-based layer switching *and* manual control when pulling (`preferredRid`, `priorityOrdering`, `ridNotAvailable`). Cloudflare does **not** mandate rid names; we use `f` / `h` / `q` because under `asciibetical` ordering `a` is the most desirable, so those names sort best-first. Pulls ask for `asciibetical` on both options: downshift on congestion, fall back when a layer disappears.
 
 Ladders differ by `MediaStreamTrack.contentHint`, because a shared spreadsheet and a shared game want opposite tradeoffs:
 
@@ -195,7 +249,7 @@ Ladders differ by `MediaStreamTrack.contentHint`, because a shared spreadsheet a
 | Screenshare, video/game | `'motion'` | `f` 1080p30 ≈3.0 · `h` 720p30 ≈1.2 · `q` 540p30 ≈0.5 |
 | Webcam | `'motion'` | `f` 720p30 ≈1.2 · `h` 360p30 ≈0.5 · `q` 180p15 ≈0.15 |
 
-Only two layers for text screenshare on purpose: a 360p share of code is unreadable, so that layer would be pure wasted egress. The client picks `preferredRid` from the tile's rendered size and lets Cloudflare downshift on congestion.
+Only two layers for text screenshare on purpose: a 360p share of code is unreadable, so that layer would be pure wasted egress — and the publish check refuses an offer that declares it. The join ack ships these as `video.profiles` (capture constraints plus `sendEncodings`-ready layers). The client picks `preferredRid` from the tile's rendered size and lets Cloudflare downshift on congestion. On the SFU the audio ceiling no longer divides the uplink: a sender uploads once whatever the room size.
 
 ---
 
@@ -204,13 +258,13 @@ Only two layers for text screenshare on purpose: a 360p share of code is unreada
 Add to `.env.example` and a new `src/config/voice.ts` (`ORIGIN` is already documented, from Phase 0.1):
 
 ```
-VOICE_MESH_MAX=5             # > this many participants ⇒ SFU
-VIDEO_MESH_MAX=2             # > this many, with a video publisher ⇒ SFU
+VOICE_MESH_MAX=5             # > this many participants ⇒ SFU (or refused, without one)
+VOICE_SFU_MAX=25             # hard cap on a room once it is on the SFU
 VOICE_MAX_AUDIO_BITRATE=40000
 CF_TURN_KEY_ID=
 CF_TURN_KEY_API_TOKEN=
-CF_REALTIME_APP_ID=          # Phase 2 (SFU)
-CF_REALTIME_APP_SECRET=      # Phase 2 (SFU)
+CF_REALTIME_APP_ID=          # Phase 2 (SFU) — both or neither
+CF_REALTIME_APP_SECRET=      # Phase 2 (SFU) — never leaves the server
 ```
 
 Register it in `app.module.ts` as `load: [database, auth, voice]`.

@@ -41,8 +41,8 @@ A comunicação de chat em tempo real é feita via **Socket.IO** (`@nestjs/webso
 
    | Variável                  | Descrição                                                                   | Default                          |
    | ------------------------- | --------------------------------------------------------------------------- | -------------------------------- |
-   | `VOICE_MESH_MAX`          | Acima disso a sala precisaria de SFU; como o SFU é Fase 2, o join é recusado | `5`                              |
-   | `VIDEO_MESH_MAX`          | Idem, com publisher de vídeo. Sem efeito até a Fase 2                        | `2`                              |
+   | `VOICE_MESH_MAX`          | Acima disso a sala vai para o SFU (ou o join é recusado, sem SFU)            | `5`                              |
+   | `VOICE_SFU_MAX`           | Teto de participantes numa sala no SFU — limita o egress por sala            | `25`                             |
    | `VOICE_MAX_AUDIO_BITRATE` | Teto por stream de áudio (Opus mono), em bps                                 | `40000`                          |
    | `VOICE_UPLINK_BUDGET`     | Uplink total assumido por cliente; no mesh o teto por peer divide isso       | `VOICE_MAX_AUDIO_BITRATE × VOICE_MESH_MAX` |
    | `TURN_URL`                | TURN estático (lista por vírgula). **Vence** o Cloudflare quando definido    | *(vazio)*                        |
@@ -51,7 +51,11 @@ A comunicação de chat em tempo real é feita via **Socket.IO** (`@nestjs/webso
    | `CF_TURN_KEY_API_TOKEN`   | Cloudflare Realtime TURN — token de API                                      | *(vazio)*                        |
    | `CF_TURN_TTL`             | Validade das credenciais mintadas, em segundos (Cloudflare limita a 24h)     | `3600`                           |
    | `STUN_URL`                | STUN de último recurso, quando não há TURN nenhum (lista por vírgula)        | `stun:stun.cloudflare.com:3478`  |
+   | `CF_REALTIME_APP_ID`      | Cloudflare Realtime SFU — id do app. Liga vídeo e salas acima do mesh        | *(vazio)*                        |
+   | `CF_REALTIME_APP_SECRET`  | Cloudflare Realtime SFU — secret do app. **Nunca** sai do servidor           | *(vazio)*                        |
 
+   > O SFU só liga com `CF_REALTIME_APP_ID` **e** `CF_REALTIME_APP_SECRET`; sem eles a voz fica no mesh P2P, só áudio, e a sala enche em `VOICE_MESH_MAX`.
+   >
    > O `VoiceIceService` escolhe em três níveis: **TURN estático** (se `TURN_URL`), senão **Cloudflare** (se as duas chaves), senão **STUN-only**. Sem TURN o áudio funciona em dev, mas ~15–20% dos usuários reais (NAT simétrico) não conseguem conectar. Um valor `<= 0` ou não-numérico em qualquer knob numérico cai no default em vez de propagar (`src/common/env.ts`).
 
 ## Subindo a infraestrutura (Docker)

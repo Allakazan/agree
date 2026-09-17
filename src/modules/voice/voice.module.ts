@@ -7,6 +7,8 @@ import { VoiceGateway } from './voice.gateway';
 import { VoiceIceService } from './voice.ice.service';
 import { VOICE_PRESENCE_STORE } from './voice.presence.interface';
 import { InMemoryVoicePresenceService } from './voice.presence.service';
+import { CloudflareSfuClient } from './voice.sfu.client';
+import { VoiceSfuService } from './voice.sfu.service';
 import { VoiceTopologyService } from './voice.topology.service';
 
 @Module({
@@ -18,6 +20,8 @@ import { VoiceTopologyService } from './voice.topology.service';
     VoiceGateway,
     VoiceTopologyService,
     VoiceIceService,
+    CloudflareSfuClient,
+    VoiceSfuService,
     // The Redis seam: presence is behind its interface, so swapping the store
     // out later is this one line plus a new implementation, not a refactor.
     { provide: VOICE_PRESENCE_STORE, useClass: InMemoryVoicePresenceService },

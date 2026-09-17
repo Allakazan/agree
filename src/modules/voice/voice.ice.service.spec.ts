@@ -6,11 +6,12 @@ import { VoiceIceService } from './voice.ice.service';
 const configWith = (turn: Partial<VoiceConfig['turn']> = {}): ConfigService => {
   const config: VoiceConfig = {
     meshMax: 5,
-    videoMeshMax: 2,
+    sfuMax: 25,
     maxAudioBitrate: 40_000,
     uplinkBudget: 200_000,
     turn: { static: { urls: [] }, ttl: 3600, ...turn },
     stunUrls: ['stun:stun.example:3478'],
+    sfu: {},
   };
 
   return { get: () => config } as unknown as ConfigService;

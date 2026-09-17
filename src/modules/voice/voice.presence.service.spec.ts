@@ -1,5 +1,6 @@
 import { InMemoryVoicePresenceService } from './voice.presence.service';
-import { VoiceParticipant } from './types/voice.types';
+import { VoiceSfuState } from './voice.presence.interface';
+import { VoiceParticipant, VoiceTrack } from './types/voice.types';
 
 describe('InMemoryVoicePresenceService', () => {
   let presence: InMemoryVoicePresenceService;
@@ -11,7 +12,28 @@ describe('InMemoryVoicePresenceService', () => {
     muted: false,
     deafened: false,
     joinedAt: '2025-09-07T12:00:00.000Z',
+    tracks: [],
   });
+
+  const camera: VoiceTrack = {
+    trackName: 'camera',
+    source: 'camera',
+    kind: 'video',
+    rids: ['f', 'h', 'q'],
+  };
+
+  const mic: VoiceTrack = {
+    trackName: 'mic',
+    source: 'mic',
+    kind: 'audio',
+    rids: [],
+  };
+
+  const sfuState: VoiceSfuState = {
+    sessionId: 'cf-session-1',
+    published: { '0': 'mic' },
+    pulled: {},
+  };
 
   beforeEach(() => {
     presence = new InMemoryVoicePresenceService();
@@ -126,6 +148,73 @@ describe('InMemoryVoicePresenceService', () => {
       await presence.add('channel-a', participant('socket-1', 'user-1'));
 
       expect(await presence.findByUser('channel-b', 'user-1')).toBeNull();
+    });
+  });
+
+  describe('tracks', () => {
+    it('appends and removes published tracks by name', async () => {
+      await presence.add('channel-a', participant('socket-1', 'user-1'));
+
+      await presence.addTracks('channel-a', 'socket-1', [mic, camera]);
+      const updated = await presence.removeTracks('channel-a', 'socket-1', [
+        'camera',
+      ]);
+
+      expect(updated?.tracks).toEqual([mic]);
+      expect((await presence.get('channel-a', 'socket-1'))?.tracks).toEqual([
+        mic,
+      ]);
+    });
+
+    it('does not mutate a roster snapshot handed out earlier', async () => {
+      await presence.add('channel-a', participant('socket-1', 'user-1'));
+      const before = await presence.listByChannel('channel-a');
+
+      await presence.addTracks('channel-a', 'socket-1', [camera]);
+
+      expect(before[0].tracks).toEqual([]);
+    });
+
+    it('returns null for a socket that is not in the channel', async () => {
+      expect(
+        await presence.addTracks('channel-a', 'socket-1', [camera]),
+      ).toBeNull();
+    });
+  });
+
+  describe('SFU state', () => {
+    it('is stored beside the participant, never on it', async () => {
+      await presence.add('channel-a', participant('socket-1', 'user-1'));
+
+      await presence.setSfuState('channel-a', 'socket-1', sfuState);
+
+      expect(await presence.getSfuState('channel-a', 'socket-1')).toEqual(
+        sfuState,
+      );
+      // The participant is the broadcast shape: a session id on it would leak.
+      expect(
+        JSON.stringify(await presence.listByChannel('channel-a')),
+      ).not.toContain('cf-session-1');
+    });
+
+    it('ignores a write for a socket that already left', async () => {
+      // An SFU call resolving after a disconnect must not resurrect state.
+      await presence.setSfuState('channel-a', 'socket-1', sfuState);
+
+      expect(await presence.getSfuState('channel-a', 'socket-1')).toBeNull();
+    });
+
+    it('is cleared with the participant, on remove and on disconnect', async () => {
+      await presence.add('channel-a', participant('socket-1', 'user-1'));
+      await presence.add('channel-b', participant('socket-1', 'user-1'));
+      await presence.setSfuState('channel-a', 'socket-1', sfuState);
+      await presence.setSfuState('channel-b', 'socket-1', sfuState);
+
+      await presence.remove('channel-a', 'socket-1');
+      await presence.removeSocket('socket-1');
+
+      expect(await presence.getSfuState('channel-a', 'socket-1')).toBeNull();
+      expect(await presence.getSfuState('channel-b', 'socket-1')).toBeNull();
     });
   });
 });

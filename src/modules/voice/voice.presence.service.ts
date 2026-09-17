@@ -3,24 +3,28 @@ import {
   VoiceParticipantState,
   VoicePresenceStore,
   VoiceRemoval,
+  VoiceSfuState,
 } from './voice.presence.interface';
-import { VoiceParticipant } from './types/voice.types';
+import { VoiceParticipant, VoiceTrack } from './types/voice.types';
 
 /**
  * In-memory `VoicePresenceStore`. Correct for exactly one instance — which is
  * also all the socket.io rooms it mirrors can serve without a Redis adapter, so
  * nothing is lost by keeping both single-process until they move together.
  *
- * Two indexes, kept in step by every mutating method:
+ * Three indexes, kept in step by every mutating method:
  *  - `byChannel`: channelId → socketId → participant, for the roster.
  *  - `bySocket`: socketId → channels, so a disconnect costs O(channels of that
  *    socket) instead of a scan of every channel on the server.
+ *  - `sfu`: channelId → socketId → SFU state, beside the participant rather
+ *    than on it, so a broadcast participant can never carry a session id.
  * `Map` preserves insertion order, so the roster comes out in join order.
  */
 @Injectable()
 export class InMemoryVoicePresenceService implements VoicePresenceStore {
   private readonly byChannel = new Map<string, Map<string, VoiceParticipant>>();
   private readonly bySocket = new Map<string, Set<string>>();
+  private readonly sfu = new Map<string, Map<string, VoiceSfuState>>();
 
   add(
     channelId: string,
@@ -64,6 +68,12 @@ export class InMemoryVoicePresenceService implements VoicePresenceStore {
     return Promise.resolve(removals);
   }
 
+  get(channelId: string, socketId: string): Promise<VoiceParticipant | null> {
+    return Promise.resolve(
+      this.byChannel.get(channelId)?.get(socketId) ?? null,
+    );
+  }
+
   listByChannel(channelId: string): Promise<VoiceParticipant[]> {
     return Promise.resolve([
       ...(this.byChannel.get(channelId)?.values() ?? []),
@@ -79,15 +89,12 @@ export class InMemoryVoicePresenceService implements VoicePresenceStore {
     socketId: string,
     state: VoiceParticipantState,
   ): Promise<VoiceParticipant | null> {
-    const current = this.byChannel.get(channelId)?.get(socketId);
-    if (!current) return Promise.resolve(null);
-
-    // Replaced rather than mutated in place, so a roster snapshot handed out
-    // earlier keeps the values it was read with.
-    const updated: VoiceParticipant = { ...current, ...state };
-    this.byChannel.get(channelId)?.set(socketId, updated);
-
-    return Promise.resolve(updated);
+    return Promise.resolve(
+      this.replace(channelId, socketId, (current) => ({
+        ...current,
+        ...state,
+      })),
+    );
   }
 
   findByUser(
@@ -100,9 +107,80 @@ export class InMemoryVoicePresenceService implements VoicePresenceStore {
     return Promise.resolve(null);
   }
 
+  addTracks(
+    channelId: string,
+    socketId: string,
+    tracks: VoiceTrack[],
+  ): Promise<VoiceParticipant | null> {
+    return Promise.resolve(
+      this.replace(channelId, socketId, (current) => ({
+        ...current,
+        tracks: [...current.tracks, ...tracks],
+      })),
+    );
+  }
+
+  removeTracks(
+    channelId: string,
+    socketId: string,
+    trackNames: string[],
+  ): Promise<VoiceParticipant | null> {
+    return Promise.resolve(
+      this.replace(channelId, socketId, (current) => ({
+        ...current,
+        tracks: current.tracks.filter(
+          (track) => !trackNames.includes(track.trackName),
+        ),
+      })),
+    );
+  }
+
+  getSfuState(
+    channelId: string,
+    socketId: string,
+  ): Promise<VoiceSfuState | null> {
+    return Promise.resolve(this.sfu.get(channelId)?.get(socketId) ?? null);
+  }
+
+  setSfuState(
+    channelId: string,
+    socketId: string,
+    state: VoiceSfuState,
+  ): Promise<void> {
+    if (!this.byChannel.get(channelId)?.has(socketId)) return Promise.resolve();
+
+    let channel = this.sfu.get(channelId);
+    if (!channel) {
+      channel = new Map<string, VoiceSfuState>();
+      this.sfu.set(channelId, channel);
+    }
+    channel.set(socketId, state);
+
+    return Promise.resolve();
+  }
+
   /**
-   * The one place both indexes are unwound. Deletes the channel bucket and the
-   * socket bucket once they empty, so an idle server holds no keys for channels
+   * Swaps a participant for an updated copy rather than mutating it in place,
+   * so a roster snapshot handed out earlier keeps the values it was read with.
+   */
+  private replace(
+    channelId: string,
+    socketId: string,
+    update: (current: VoiceParticipant) => VoiceParticipant,
+  ): VoiceParticipant | null {
+    const channel = this.byChannel.get(channelId);
+    const current = channel?.get(socketId);
+    if (!channel || !current) return null;
+
+    const updated = update(current);
+    channel.set(socketId, updated);
+
+    return updated;
+  }
+
+  /**
+   * The one place every index is unwound. Deletes the channel, socket and SFU
+   * buckets once they empty, so an idle server holds no keys for channels
    * nobody is in.
    */
   private removeSync(channelId: string, socketId: string): VoiceRemoval | null {
@@ -117,6 +195,10 @@ export class InMemoryVoicePresenceService implements VoicePresenceStore {
     const channels = this.bySocket.get(socketId);
     channels?.delete(channelId);
     if (channels && channels.size === 0) this.bySocket.delete(socketId);
+
+    const sfu = this.sfu.get(channelId);
+    sfu?.delete(socketId);
+    if (sfu && sfu.size === 0) this.sfu.delete(channelId);
 
     return { channelId, participant, channelEmptied };
   }

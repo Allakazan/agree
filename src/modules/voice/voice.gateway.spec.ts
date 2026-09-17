@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { LoggedUser } from 'src/modules/auth/types/loggedUser.type';
 import { AuthGuard } from 'src/modules/auth/guards/auth.guard';
@@ -11,6 +11,8 @@ import { VoiceGateway } from './voice.gateway';
 import { VoiceIceService } from './voice.ice.service';
 import { VOICE_PRESENCE_STORE } from './voice.presence.interface';
 import { InMemoryVoicePresenceService } from './voice.presence.service';
+import { CloudflareSfuClient, SessionDescription } from './voice.sfu.client';
+import { VoiceSfuService } from './voice.sfu.service';
 import { VoiceTopologyService } from './voice.topology.service';
 import { VoiceSignalDto, VoiceSignalKind } from './dto/voice-signal.dto';
 import { VoiceParticipant } from './types/voice.types';
@@ -57,12 +59,45 @@ const asSocket = (client: TestClient) => client as never;
 const participantLike = (shape: Partial<VoiceParticipant>): VoiceParticipant =>
   expect.objectContaining(shape) as VoiceParticipant;
 
+/** A publish offer for a VP8 camera simulcasting the full ladder. */
+const cameraOffer = (mid = '0'): SessionDescription => ({
+  type: 'offer',
+  sdp: [
+    'v=0',
+    'm=video 9 UDP/TLS/RTP/SAVPF 96 97',
+    `a=mid:${mid}`,
+    'a=rtpmap:96 VP8/90000',
+    'a=rtpmap:97 rtx/90000',
+    'a=simulcast:send f;h;q',
+    '',
+  ].join('\r\n'),
+});
+
+const micOffer = (mid = '0'): SessionDescription => ({
+  type: 'offer',
+  sdp: [
+    'v=0',
+    'm=audio 9 UDP/TLS/RTP/SAVPF 111',
+    `a=mid:${mid}`,
+    'a=rtpmap:111 opus/48000/2',
+    '',
+  ].join('\r\n'),
+});
+
 describe('VoiceGateway', () => {
   let gateway: VoiceGateway;
   let presence: InMemoryVoicePresenceService;
   let serverService: { findChannelForMember: jest.Mock };
   let wsAuthService: { authenticate: jest.Mock };
   let iceService: { getIceServers: jest.Mock };
+  let cfClient: {
+    createSession: jest.Mock;
+    pushTracks: jest.Mock;
+    pullTracks: jest.Mock;
+    renegotiate: jest.Mock;
+    closeTracks: jest.Mock;
+    updateTracks: jest.Mock;
+  };
   /** Everything the *server* broadcast, i.e. `server.to(target).emit`. */
   let serverEmit: jest.Mock;
   let serverTo: jest.Mock;
@@ -75,28 +110,50 @@ describe('VoiceGateway', () => {
   const room = 'voice:channel-id';
   const iceServers = [{ urls: ['stun:stun.example:3478'] }];
 
-  const voiceConfig = (meshMax: number): VoiceConfig => ({
+  type SetupOptions = { meshMax?: number; sfuMax?: number; sfu?: boolean };
+
+  const voiceConfig = ({
+    meshMax = 5,
+    sfuMax = 25,
+    sfu = false,
+  }: SetupOptions): VoiceConfig => ({
     meshMax,
-    videoMeshMax: 2,
+    sfuMax,
     maxAudioBitrate: 40_000,
     uplinkBudget: 200_000,
     turn: { static: { urls: [] }, ttl: 3600 },
     stunUrls: ['stun:stun.example:3478'],
+    sfu: sfu ? { appId: 'app-id', appSecret: 'app-secret' } : {},
   });
 
-  const setup = async (meshMax = 5) => {
+  const setup = async (options: SetupOptions = {}) => {
     presence = new InMemoryVoicePresenceService();
     serverService = { findChannelForMember: jest.fn() };
     wsAuthService = { authenticate: jest.fn() };
     iceService = { getIceServers: jest.fn().mockResolvedValue(iceServers) };
+    let sessions = 0;
+    cfClient = {
+      createSession: jest.fn(() => Promise.resolve(`session-${++sessions}`)),
+      pushTracks: jest.fn().mockResolvedValue({
+        sessionDescription: { type: 'answer', sdp: 'v=0 answer' },
+      }),
+      pullTracks: jest.fn(),
+      renegotiate: jest.fn().mockResolvedValue(undefined),
+      closeTracks: jest.fn().mockResolvedValue({}),
+      updateTracks: jest.fn().mockResolvedValue({}),
+    };
 
     const module = await Test.createTestingModule({
       providers: [
         VoiceGateway,
         VoiceTopologyService,
+        // The real orchestration over a fake Cloudflare: authorization and
+        // bookkeeping are what these tests are about.
+        VoiceSfuService,
+        { provide: CloudflareSfuClient, useValue: cfClient },
         {
           provide: ConfigService,
-          useValue: { get: () => voiceConfig(meshMax) },
+          useValue: { get: () => voiceConfig(options) },
         },
         { provide: ServerService, useValue: serverService },
         { provide: WsAuthService, useValue: wsAuthService },
@@ -179,6 +236,8 @@ describe('VoiceGateway', () => {
         participants: [],
         iceServers,
         bitrate: { audio: { maxBitrate: 40_000 } },
+        // No SFU configured in this setup: the server carries no video.
+        video: null,
       });
       expect(await presence.countByChannel(channelId)).toBe(1);
     });
@@ -223,8 +282,8 @@ describe('VoiceGateway', () => {
       expect(client.join).not.toHaveBeenCalled();
     });
 
-    it('rejects a join past the mesh limit, since there is no SFU to promote to yet', async () => {
-      await setup(1);
+    it('rejects a join past the mesh limit when there is no SFU to promote to', async () => {
+      await setup({ meshMax: 1 });
       const ana1 = makeClient('socket-1');
       const bento1 = makeClient('socket-2');
       await join(ana1, ana);
@@ -234,6 +293,54 @@ describe('VoiceGateway', () => {
       );
       expect(bento1.join).not.toHaveBeenCalled();
       expect(await presence.countByChannel(channelId)).toBe(1);
+      // A refused join must not leave the room reporting `sfu` to everyone.
+      expect(gateway['topologyService'].current(channelId)).toBe('mesh');
+    });
+
+    describe('with an SFU configured', () => {
+      it('promotes the room instead of refusing the joiner past the mesh limit', async () => {
+        await setup({ meshMax: 1, sfu: true });
+        const ana1 = makeClient('socket-1');
+        const bento1 = makeClient('socket-2');
+        await join(ana1, ana);
+
+        const ack = await join(bento1, bento);
+
+        expect(ack.topology).toBe('sfu');
+        expect(ack.video?.codecs).toEqual(['VP8']);
+        // Existing members migrate; the joiner learns it from its own ack.
+        expect(bento1.roomEmit).toHaveBeenCalledWith('voice:topology-changed', {
+          channelId,
+          topology: 'sfu',
+        });
+      });
+
+      it('announces the promotion once, not on every later join', async () => {
+        await setup({ meshMax: 1, sfu: true });
+        await join(makeClient('socket-1'), ana);
+        await join(makeClient('socket-2'), bento);
+        const carol1 = makeClient('socket-3');
+
+        await join(carol1, { sub: 'user-carol', username: 'carol' });
+
+        expect(carol1.roomEmit).not.toHaveBeenCalledWith(
+          'voice:topology-changed',
+          expect.anything(),
+        );
+      });
+
+      it('refuses a joiner past the SFU cap', async () => {
+        await setup({ meshMax: 1, sfuMax: 2, sfu: true });
+        await join(makeClient('socket-1'), ana);
+        await join(makeClient('socket-2'), bento);
+
+        await expect(
+          join(makeClient('socket-3'), {
+            sub: 'user-carol',
+            username: 'carol',
+          }),
+        ).rejects.toThrow('This voice channel is full (2 participants)');
+      });
     });
 
     it('re-acks an already joined socket without announcing it twice', async () => {
@@ -358,6 +465,23 @@ describe('VoiceGateway', () => {
         'Cannot signal yourself',
       );
     });
+
+    it('rejects mesh signalling in a room that has moved onto the SFU', async () => {
+      await setup({ meshMax: 1, sfu: true });
+      const ana1 = makeClient('socket-1');
+      const bento1 = makeClient('socket-2');
+      await join(ana1, ana);
+      await join(bento1, bento);
+
+      // A mesh-only client must not keep running P2P past the limit.
+      await expect(signal(bento1, bento, 'user-ana')).rejects.toThrow(
+        'This voice channel is on the media server, not peer to peer',
+      );
+      expect(serverEmit).not.toHaveBeenCalledWith(
+        'voice:signal',
+        expect.anything(),
+      );
+    });
   });
 
   describe('voice:state', () => {
@@ -415,16 +539,233 @@ describe('VoiceGateway', () => {
     });
 
     it('releases an emptied room back to the mesh', async () => {
-      await setup(1);
       const client = makeClient('socket-1');
       await join(client, ana);
-      // Force the room past the limit so it is marked promoted.
       const topology = gateway['topologyService'];
-      topology.decideForJoin(channelId, 5);
+      topology.promote(channelId);
 
       await gateway.handleDisconnect(asSocket(client));
 
       expect(topology.current(channelId)).toBe('mesh');
+    });
+  });
+
+  describe('SFU', () => {
+    const publishCamera = (client: TestClient, user: LoggedUser) =>
+      gateway.handleSfuPublish(
+        {
+          channelId,
+          sessionDescription: cameraOffer() as never,
+          tracks: [{ mid: '0', source: 'camera' }],
+        },
+        asSocket(client),
+        user,
+      );
+
+    /** Every payload that left the server: broadcasts, room emits and acks. */
+    const everythingEmitted = (clients: TestClient[], acks: unknown[]) =>
+      JSON.stringify([
+        serverEmit.mock.calls,
+        ...clients.map((client) => client.roomEmit.mock.calls as unknown[]),
+        ...clients.map((client) => client.emit.mock.calls as unknown[]),
+        acks,
+      ]);
+
+    let ana1: TestClient;
+    let bento1: TestClient;
+
+    beforeEach(async () => {
+      await setup({ sfu: true });
+      ana1 = makeClient('socket-1');
+      bento1 = makeClient('socket-2');
+      await join(ana1, ana);
+      await join(bento1, bento);
+    });
+
+    describe('voice:sfu:publish', () => {
+      it('takes a mesh room onto the SFU with its first video publisher', async () => {
+        const ack = await publishCamera(ana1, ana);
+
+        expect(ack).toEqual({
+          sessionDescription: { type: 'answer', sdp: 'v=0 answer' },
+          tracks: [{ mid: '0', trackName: 'camera' }],
+        });
+        expect(gateway['topologyService'].current(channelId)).toBe('sfu');
+        expect(serverTo).toHaveBeenCalledWith(room);
+        expect(serverEmit).toHaveBeenCalledWith('voice:topology-changed', {
+          channelId,
+          topology: 'sfu',
+        });
+        expect(ana1.roomEmit).toHaveBeenCalledWith('voice:track-published', {
+          channelId,
+          userId: 'user-ana',
+          track: {
+            trackName: 'camera',
+            source: 'camera',
+            kind: 'video',
+            rids: ['f', 'h', 'q'],
+          },
+        });
+      });
+
+      it('announces the promotion once, however many publish video', async () => {
+        await publishCamera(ana1, ana);
+        await publishCamera(bento1, bento);
+
+        const promotions = serverEmit.mock.calls.filter(
+          ([event]) => event === 'voice:topology-changed',
+        );
+        expect(promotions).toHaveLength(1);
+      });
+
+      it('leaves the room on the mesh when Cloudflare refuses the publish', async () => {
+        jest.spyOn(Logger.prototype, 'error').mockImplementation();
+        cfClient.pushTracks.mockRejectedValue(new Error('503'));
+
+        await expect(publishCamera(ana1, ana)).rejects.toThrow(
+          'The media server rejected the request',
+        );
+        expect(gateway['topologyService'].current(channelId)).toBe('mesh');
+        expect(serverEmit).not.toHaveBeenCalledWith(
+          'voice:topology-changed',
+          expect.anything(),
+        );
+      });
+
+      it('refuses audio-only publishing on a mesh room', async () => {
+        await expect(
+          gateway.handleSfuPublish(
+            {
+              channelId,
+              sessionDescription: micOffer() as never,
+              tracks: [{ mid: '0', source: 'mic' }],
+            },
+            asSocket(ana1),
+            ana,
+          ),
+        ).rejects.toThrow(
+          'This voice channel is peer to peer; audio goes over voice:signal',
+        );
+        expect(cfClient.pushTracks).not.toHaveBeenCalled();
+      });
+
+      it('refuses video when no SFU is configured', async () => {
+        await setup();
+        const client = makeClient('socket-1');
+        await join(client, ana);
+
+        await expect(publishCamera(client, ana)).rejects.toThrow(
+          'Video is not available on this server',
+        );
+      });
+
+      it('rejects a socket that never joined, and does not repair its membership', async () => {
+        const stranger = makeClient('socket-9');
+
+        await expect(publishCamera(stranger, ana)).rejects.toThrow(
+          'Join this voice channel first',
+        );
+        expect(stranger.join).not.toHaveBeenCalled();
+        expect(cfClient.createSession).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('voice:sfu:pull', () => {
+      it('refuses a room that is still on the mesh', async () => {
+        await expect(
+          gateway.handleSfuPull(
+            { channelId, tracks: [{ userId: 'user-bento', trackName: 'mic' }] },
+            asSocket(ana1),
+          ),
+        ).rejects.toThrow('This voice channel is not on the media server');
+      });
+
+      it('rejects a socket that never joined, and does not repair its membership', async () => {
+        await publishCamera(bento1, bento);
+        const stranger = makeClient('socket-9');
+
+        await expect(
+          gateway.handleSfuPull(
+            {
+              channelId,
+              tracks: [{ userId: 'user-bento', trackName: 'camera' }],
+            },
+            asSocket(stranger),
+          ),
+        ).rejects.toThrow('Join this voice channel first');
+        expect(stranger.join).not.toHaveBeenCalled();
+        expect(cfClient.pullTracks).not.toHaveBeenCalled();
+      });
+
+      it('never lets a Cloudflare session id leave the server', async () => {
+        await publishCamera(bento1, bento);
+        cfClient.pullTracks.mockImplementation(
+          (
+            _session: string,
+            tracks: { sessionId: string; trackName: string }[],
+          ) =>
+            Promise.resolve({
+              sessionDescription: { type: 'offer', sdp: 'v=0 cf offer' },
+              requiresImmediateRenegotiation: true,
+              tracks: tracks.map((track, i) => ({ ...track, mid: `${i + 5}` })),
+            }),
+        );
+
+        const pullAck = await gateway.handleSfuPull(
+          {
+            channelId,
+            tracks: [{ userId: 'user-bento', trackName: 'camera' }],
+          },
+          asSocket(ana1),
+        );
+        const rejoinAck = await join(ana1, ana);
+
+        // The pull did reach Cloudflare with bento's session...
+        expect(cfClient.pullTracks).toHaveBeenCalledWith(expect.any(String), [
+          expect.objectContaining({ sessionId: 'session-1' }),
+        ]);
+        // ...but no payload a client can see carries one.
+        expect(
+          everythingEmitted([ana1, bento1], [pullAck, rejoinAck]),
+        ).not.toMatch(/session-\d/);
+      });
+    });
+
+    describe('voice:sfu:close', () => {
+      it('takes a closed camera off the room', async () => {
+        await publishCamera(ana1, ana);
+
+        await gateway.handleSfuClose(
+          {
+            channelId,
+            mids: ['0'],
+            sessionDescription: { type: 'offer', sdp: 'v=0 close' },
+          },
+          asSocket(ana1),
+          ana,
+        );
+
+        expect(ana1.roomEmit).toHaveBeenCalledWith('voice:track-unpublished', {
+          channelId,
+          userId: 'user-ana',
+          trackName: 'camera',
+        });
+        expect(
+          (await presence.findByUser(channelId, 'user-ana'))?.tracks,
+        ).toEqual([]);
+      });
+    });
+
+    it('clears SFU state with the rest of presence on disconnect', async () => {
+      await publishCamera(ana1, ana);
+
+      await gateway.handleDisconnect(asSocket(ana1));
+
+      expect(await presence.getSfuState(channelId, 'socket-1')).toBeNull();
+      expect(serverEmit).toHaveBeenCalledWith('voice:peer-left', {
+        channelId,
+        participant: participantLike({ socketId: 'socket-1' }),
+      });
     });
   });
 });
