@@ -56,6 +56,12 @@ export type VoiceParticipant = {
   socketId: string;
   userId: string;
   username: string;
+  /**
+   * The server that owns the channel. Denormalized like `username`: the
+   * disconnect sweep only knows the socket, and this is what lets it tell the
+   * right `server:<id>` room without a Mongo round trip.
+   */
+  serverId: string;
   muted: boolean;
   deafened: boolean;
   /** ISO8601. Lets a client order the roster by arrival without a server sort. */
@@ -126,4 +132,14 @@ export type VoiceJoinAck = {
   bitrate: VoiceBitratePolicy;
   /** `null` when the SFU is not configured: this server carries no video. */
   video: VoiceVideoPolicy | null;
+};
+
+/**
+ * The `voice:watch` acknowledgement — every voice channel of the server with
+ * whoever is in it right now. Empty channels are listed too, so a client can
+ * replace its whole map instead of guessing which channels went quiet.
+ */
+export type VoiceWatchAck = {
+  serverId: string;
+  channels: Record<string, VoiceParticipant[]>;
 };

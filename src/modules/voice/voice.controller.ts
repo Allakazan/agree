@@ -39,18 +39,18 @@ export class VoiceController {
     @Param('channelId') channelId: string,
     @User() user: LoggedUser,
   ) {
-    const channel = await this.serverService.findChannelForMember(
+    const match = await this.serverService.findChannelForMember(
       user.sub,
       channelId,
     );
 
-    if (!channel) {
+    if (!match) {
       throw new BadRequestException(
         "You are not a member of this channel's server",
       );
     }
 
-    if (channel.type !== ChannelType.VOICE) {
+    if (match.channel.type !== ChannelType.VOICE) {
       throw new BadRequestException('This channel is not a voice channel');
     }
 

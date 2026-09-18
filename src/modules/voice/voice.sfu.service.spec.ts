@@ -73,6 +73,7 @@ describe('VoiceSfuService', () => {
     socketId,
     userId,
     username: userId,
+    serverId: 'server-id',
     muted: false,
     deafened: false,
     joinedAt: '2026-09-13T12:00:00.000Z',

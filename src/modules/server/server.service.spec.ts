@@ -275,7 +275,7 @@ describe('ServerService', () => {
         { 'channels._id': new Types.ObjectId(validChannelId) },
         { _id: 1, 'channels.$': 1 },
       );
-      expect(result).toBe(channel);
+      expect(result).toEqual({ serverId: 'server-id', channel });
     });
 
     it('returns null when no server contains the channel', async () => {

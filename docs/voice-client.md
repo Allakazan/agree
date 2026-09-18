@@ -71,6 +71,8 @@ Todo handler responde por **ack** (callback do socket.io). Use `emitWithAck`.
 | `voice:leave` | `{ channelId }` | `{ status: 'left', channelId }` |
 | `voice:signal` | `{ channelId, targetUserId, kind, payload }` | `{ status: 'sent' }` |
 | `voice:state` | `{ channelId, muted, deafened }` | `VoiceParticipant` atualizado |
+| `voice:watch` | `{ serverId }` | `VoiceWatchAck` (abaixo) — snapshot de todos os canais de voz do servidor |
+| `voice:unwatch` | `{ serverId }` | `{ status: 'unwatched', serverId }` |
 
 `kind` é `'offer' | 'answer' | 'candidate'`. `payload` é um
 `RTCSessionDescriptionInit` ou `RTCIceCandidateInit` — o servidor repassa
@@ -87,6 +89,7 @@ DTO rejeita qualquer outra coisa antes de chegar no handler.
 | `voice:peer-left` | `{ channelId, participant }` | Fecha o `RTCPeerConnection` daquele peer e remove o `<audio>`. |
 | `voice:signal` | `{ channelId, fromUserId, kind, payload }` | Alimenta a negociação (ver fluxo abaixo). |
 | `voice:state-changed` | `{ channelId, participant }` | Atualiza ícone de mute/deafen. |
+| `voice:presence` | `{ serverId, channelId, participants }` | Só para quem fez `voice:watch` nesse servidor. Roster **completo** do canal — substitua o que você tinha, sem diff. |
 | `voice:evicted` | `{ channelId, reason: 'joined-from-another-device' }` | Você entrou em outra aba/dispositivo. Este socket vai cair logo em seguida — mostre o aviso e **não** reconecte automaticamente. |
 | `error` | `{ status: 'error', message, ...}` | Ver "Erros". |
 
@@ -97,6 +100,7 @@ type VoiceParticipant = {
   socketId: string;
   userId: string;
   username: string;
+  serverId: string; // servidor dono do canal
   muted: boolean;
   deafened: boolean;
   joinedAt: string; // ISO8601 — dá pra ordenar o roster por chegada
@@ -135,6 +139,12 @@ type VoiceJoinAck = {
     codecs: string[]; // ['VP8'] — restrinja a offer a isso
     profiles: { camera: SimulcastProfile; screenDetail: SimulcastProfile; screenMotion: SimulcastProfile };
   } | null;
+};
+
+type VoiceWatchAck = {
+  serverId: string;
+  // Um par por canal de voz do servidor, inclusive os vazios ([]).
+  channels: Record<string, VoiceParticipant[]>;
 };
 ```
 
@@ -419,9 +429,32 @@ Authorization: Bearer <jwt>
 ```
 
 Tem o próprio gate de membership (retorna 400 para não-membro ou canal que não
-seja `VOICE`). Não há push de presença para quem está fora do canal ainda — se
-quiser a lista viva, faça polling ou espere a decisão sobre presença
-server-wide (ver "Open decisions" no doc de design).
+seja `VOICE`). Para a lista **viva**, prefira `voice:watch` (abaixo) — o REST
+fica como fallback para quem não tem socket aberto.
+
+---
+
+## Presença server-wide (`voice:watch`)
+
+Para a sidebar mostrar quem está em cada canal de voz sem ninguém precisar
+entrar na call:
+
+1. Abra um socket no namespace `/voice` (pode ser um socket **separado** do da
+   chamada — ele nunca entra em `voice:<channelId>`, então não interfere na
+   regra de "um socket por usuário por canal").
+2. `emitWithAck('voice:watch', { serverId })` → o ack é o snapshot inicial
+   (`VoiceWatchAck`), com todos os canais `voice` do servidor, vazios inclusive.
+3. A partir daí, cada mudança (join, leave, mute/deafen, queda de socket) chega
+   como `voice:presence { serverId, channelId, participants }`. É o roster
+   inteiro daquele canal: substitua, não faça merge.
+4. Ao trocar de servidor, `voice:unwatch` no anterior e `voice:watch` no novo.
+5. **Reconexão perde as rooms.** No `connect` do socket, re-emita `voice:watch`
+   do servidor atual — o ack já traz o estado que você perdeu.
+
+O gate é membership no servidor (400 para não-membro ou servidor inexistente,
+sem distinguir os dois). Só o dono do socket que fez `watch` recebe; quem está
+na call recebe os eventos `voice:peer-*` normalmente e, se também estiver
+observando, o `voice:presence` do mesmo canal — os dois são consistentes.
 
 ---
 

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
+import { HydratedDocument, Types } from 'mongoose';
 
 export type ChannelDocument = HydratedDocument<Channel>;
 
@@ -10,6 +10,9 @@ export enum ChannelType {
 
 @Schema({ _id: true })
 export class Channel {
+  /** Assigned by Mongoose (`_id: true`); declared so callers can read it without a cast. */
+  _id: Types.ObjectId;
+
   @Prop({ required: true })
   name: string;
 

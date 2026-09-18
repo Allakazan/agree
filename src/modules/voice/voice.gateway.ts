@@ -22,7 +22,7 @@ import { User } from 'src/modules/auth/decorators/user.decorator';
 import { LoggedUser } from 'src/modules/auth/types/loggedUser.type';
 import { AuthGuard } from 'src/modules/auth/guards/auth.guard';
 import { WsAuthService } from 'src/modules/auth/ws-auth.service';
-import { ChannelType } from '../server/schemas/channel.schema';
+import { Channel, ChannelType } from '../server/schemas/channel.schema';
 import { ServerService } from '../server/server.service';
 import { VoiceJoinDto } from './dto/voice-join.dto';
 import { VoiceSignalDto } from './dto/voice-signal.dto';
@@ -32,17 +32,22 @@ import { VoiceSfuPullDto } from './dto/voice-sfu-pull.dto';
 import { VoiceSfuRenegotiateDto } from './dto/voice-sfu-renegotiate.dto';
 import { VoiceSfuCloseDto } from './dto/voice-sfu-close.dto';
 import { VoiceSfuLayerDto } from './dto/voice-sfu-layer.dto';
+import { VoiceWatchDto } from './dto/voice-watch.dto';
 import { VoiceIceService } from './voice.ice.service';
 import {
   VOICE_PRESENCE_STORE,
   VoicePresenceStore,
 } from './voice.presence.interface';
-import { voiceRoom } from './voice.rooms';
 import { sourceKind } from './voice.simulcast';
 import { SessionDescription } from './voice.sfu.client';
 import { VoiceSfuPullResult, VoiceSfuService } from './voice.sfu.service';
+import { serverRoom, voiceRoom } from './voice.rooms';
 import { VoiceTopologyService } from './voice.topology.service';
-import { VoiceJoinAck, VoiceParticipant } from './types/voice.types';
+import {
+  VoiceJoinAck,
+  VoiceParticipant,
+  VoiceWatchAck,
+} from './types/voice.types';
 
 /**
  * Signaling for voice channels. Media never touches this server — Cloud Run
@@ -62,6 +67,10 @@ import { VoiceJoinAck, VoiceParticipant } from './types/voice.types';
  * `voice:<channelId>` *is* the authorization, asserted with `client.rooms.has`.
  * No other handler may call `join()` — a self-healing join on the signal path
  * would hand a room to any socket that asked for it.
+ *
+ * `voice:watch` is the read-only exception: it gates on server membership and
+ * joins `server:<serverId>`, a room that only ever *receives* `voice:presence`
+ * — nothing checks it for authorization, so it can't be used as a foothold.
  */
 @WebSocketGateway({
   namespace: 'voice',
@@ -114,7 +123,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const removals = await this.presence.removeSocket(client.id);
 
       for (const { channelId, participant, channelEmptied } of removals) {
-        this.announceLeft(channelId, participant, channelEmptied);
+        await this.announceLeft(channelId, participant, channelEmptied);
       }
     } catch (error) {
       this.logger.error(
@@ -141,12 +150,12 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // The one authorization gate. `null` covers a malformed id, an unknown
     // channel and a non-member alike, so a stranger cannot probe for which.
-    const channel = await this.serverService.findChannelForMember(
+    const match = await this.serverService.findChannelForMember(
       user.sub,
       dto.channelId,
     );
 
-    if (!channel) {
+    if (!match) {
       // BadRequestException, not Forbidden: WsGlobalExceptionFilter only
       // unwraps BadRequestException/WsException — anything else reaches the
       // client as a generic "Internal server error".
@@ -155,7 +164,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       );
     }
 
-    if (channel.type !== ChannelType.VOICE) {
+    if (match.channel.type !== ChannelType.VOICE) {
       throw new BadRequestException('This channel is not a voice channel');
     }
 
@@ -191,6 +200,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       socketId: client.id,
       userId: user.sub,
       username: user.username,
+      serverId: match.serverId,
       muted: false,
       deafened: false,
       joinedAt: new Date().toISOString(),
@@ -202,6 +212,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client
       .to(room)
       .emit('voice:peer-joined', { channelId: dto.channelId, participant });
+    await this.broadcastPresence(match.serverId, dto.channelId);
 
     const topology = this.topologyService.current(dto.channelId);
 
@@ -231,10 +242,68 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     if (removed) {
       const remaining = await this.presence.countByChannel(dto.channelId);
-      this.announceLeft(dto.channelId, removed, remaining === 0);
+      await this.announceLeft(dto.channelId, removed, remaining === 0);
     }
 
     return { status: 'left', channelId: dto.channelId };
+  }
+
+  /**
+   * Subscribes the socket to server-wide presence: who is in each voice channel
+   * of `serverId`, pushed as `voice:presence` whenever it changes, so the
+   * channel list can show a call without anyone clicking into it. The ack is
+   * the initial snapshot — subscription and first read in one round trip, the
+   * way `voice:join` hands back the roster.
+   *
+   * Gated on server membership, never on a channel: the socket ends up in
+   * `server:<serverId>` only, which no handler treats as authorization.
+   */
+  @SubscribeMessage('voice:watch')
+  async handleWatch(
+    @MessageBody(new WsValidationPipe()) dto: VoiceWatchDto,
+    @ConnectedSocket() client: Socket,
+    @User() user: LoggedUser,
+  ): Promise<VoiceWatchAck> {
+    let channels: Channel[];
+    try {
+      channels = await this.serverService.findChannelsByServer(
+        dto.serverId,
+        user.sub,
+      );
+    } catch {
+      // `findChannelsByServer` throws NotFoundException for an unknown server
+      // and a non-member alike; only BadRequestException reaches the client.
+      throw new BadRequestException('You are not a member of this server');
+    }
+
+    await client.join(serverRoom(dto.serverId));
+
+    const voiceChannels = channels.filter(
+      (channel) => channel.type === ChannelType.VOICE,
+    );
+    const rosters = await Promise.all(
+      voiceChannels.map(async (channel) => {
+        const channelId = String(channel._id);
+        return [
+          channelId,
+          await this.presence.listByChannel(channelId),
+        ] as const;
+      }),
+    );
+
+    return {
+      serverId: dto.serverId,
+      channels: Object.fromEntries(rosters),
+    };
+  }
+
+  @SubscribeMessage('voice:unwatch')
+  async handleUnwatch(
+    @MessageBody(new WsValidationPipe()) dto: VoiceWatchDto,
+    @ConnectedSocket() client: Socket,
+  ): Promise<{ status: string; serverId: string }> {
+    await client.leave(serverRoom(dto.serverId));
+    return { status: 'unwatched', serverId: dto.serverId };
   }
 
   /**
@@ -303,6 +372,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client
       .to(voiceRoom(dto.channelId))
       .emit('voice:state-changed', { channelId: dto.channelId, participant });
+    await this.broadcastPresence(participant.serverId, dto.channelId);
 
     return participant;
   }
@@ -505,7 +575,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     if (removed) {
       const remaining = await this.presence.countByChannel(channelId);
-      this.announceLeft(channelId, removed, remaining === 0);
+      await this.announceLeft(channelId, removed, remaining === 0);
     }
 
     this.server.to(participant.socketId).emit('voice:evicted', {
@@ -519,17 +589,34 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   /** Broadcasts a departure and hands an emptied room back to the mesh. */
-  private announceLeft(
+  private async announceLeft(
     channelId: string,
     participant: VoiceParticipant,
     channelEmptied: boolean,
-  ): void {
+  ): Promise<void> {
     this.server.to(voiceRoom(channelId)).emit('voice:peer-left', {
       channelId,
       participant,
     });
+    await this.broadcastPresence(participant.serverId, channelId);
 
     if (channelEmptied) this.topologyService.release(channelId);
+  }
+
+  /**
+   * Pushes a channel's full roster to everyone watching its server. The whole
+   * roster, not a delta: a watcher just replaces what it has, needs no join/
+   * leave bookkeeping, and a missed event is repaired by the next one.
+   */
+  private async broadcastPresence(
+    serverId: string,
+    channelId: string,
+  ): Promise<void> {
+    this.server.to(serverRoom(serverId)).emit('voice:presence', {
+      serverId,
+      channelId,
+      participants: await this.presence.listByChannel(channelId),
+    });
   }
 
   /** The join ack, rebuilt for an idempotent re-join. */

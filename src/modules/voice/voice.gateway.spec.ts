@@ -87,7 +87,10 @@ const micOffer = (mid = '0'): SessionDescription => ({
 describe('VoiceGateway', () => {
   let gateway: VoiceGateway;
   let presence: InMemoryVoicePresenceService;
-  let serverService: { findChannelForMember: jest.Mock };
+  let serverService: {
+    findChannelForMember: jest.Mock;
+    findChannelsByServer: jest.Mock;
+  };
   let wsAuthService: { authenticate: jest.Mock };
   let iceService: { getIceServers: jest.Mock };
   let cfClient: {
@@ -108,6 +111,8 @@ describe('VoiceGateway', () => {
   const bento: LoggedUser = { sub: 'user-bento', username: 'bento' };
   const channelId = 'channel-id';
   const room = 'voice:channel-id';
+  const serverId = 'server-id';
+  const watchRoom = 'server:server-id';
   const iceServers = [{ urls: ['stun:stun.example:3478'] }];
 
   type SetupOptions = { meshMax?: number; sfuMax?: number; sfu?: boolean };
@@ -128,7 +133,10 @@ describe('VoiceGateway', () => {
 
   const setup = async (options: SetupOptions = {}) => {
     presence = new InMemoryVoicePresenceService();
-    serverService = { findChannelForMember: jest.fn() };
+    serverService = {
+      findChannelForMember: jest.fn(),
+      findChannelsByServer: jest.fn(),
+    };
     wsAuthService = { authenticate: jest.fn() };
     iceService = { getIceServers: jest.fn().mockResolvedValue(iceServers) };
     let sessions = 0;
@@ -176,9 +184,14 @@ describe('VoiceGateway', () => {
     gateway.server = { to: serverTo, in: serverIn } as never;
 
     serverService.findChannelForMember.mockResolvedValue({
-      name: 'geral',
-      type: ChannelType.VOICE,
+      serverId,
+      channel: { name: 'geral', type: ChannelType.VOICE },
     });
+    serverService.findChannelsByServer.mockResolvedValue([
+      { _id: 'text-id', name: 'geral', type: ChannelType.TEXT },
+      { _id: channelId, name: 'lounge', type: ChannelType.VOICE },
+      { _id: 'quiet-id', name: 'quiet', type: ChannelType.VOICE },
+    ]);
   };
 
   const join = (client: TestClient, user: LoggedUser) =>
@@ -260,6 +273,19 @@ describe('VoiceGateway', () => {
       });
     });
 
+    it('pushes the full roster to everyone watching the server', async () => {
+      const client = makeClient('socket-1');
+
+      await join(client, ana);
+
+      expect(serverTo).toHaveBeenCalledWith(watchRoom);
+      expect(serverEmit).toHaveBeenCalledWith('voice:presence', {
+        serverId,
+        channelId,
+        participants: [participantLike({ userId: 'user-ana', serverId })],
+      });
+    });
+
     it('rejects a user who is not a member of the channel server', async () => {
       const client = makeClient('socket-1');
       serverService.findChannelForMember.mockResolvedValue(null);
@@ -272,8 +298,8 @@ describe('VoiceGateway', () => {
     it('rejects a text channel', async () => {
       const client = makeClient('socket-1');
       serverService.findChannelForMember.mockResolvedValue({
-        name: 'geral',
-        type: ChannelType.TEXT,
+        serverId,
+        channel: { name: 'geral', type: ChannelType.TEXT },
       });
 
       await expect(join(client, ana)).rejects.toThrow(
@@ -392,6 +418,12 @@ describe('VoiceGateway', () => {
       });
       expect(result).toEqual({ status: 'left', channelId });
       expect(await presence.countByChannel(channelId)).toBe(0);
+      expect(serverTo).toHaveBeenCalledWith(watchRoom);
+      expect(serverEmit).toHaveBeenCalledWith('voice:presence', {
+        serverId,
+        channelId,
+        participants: [],
+      });
     });
 
     it('stays quiet when the socket was never in the channel', async () => {
@@ -400,6 +432,60 @@ describe('VoiceGateway', () => {
       await gateway.handleLeave({ channelId }, asSocket(client));
 
       expect(serverEmit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('voice:watch', () => {
+    it('joins the server room and acks a snapshot of every voice channel', async () => {
+      const ana1 = makeClient('socket-1');
+      const watcher = makeClient('socket-2');
+      await join(ana1, ana);
+
+      const ack = await gateway.handleWatch(
+        { serverId },
+        asSocket(watcher),
+        bento,
+      );
+
+      expect(serverService.findChannelsByServer).toHaveBeenCalledWith(
+        serverId,
+        'user-bento',
+      );
+      expect(watcher.join).toHaveBeenCalledWith(watchRoom);
+      // Only the server room: a watcher gets no voice presence of its own.
+      expect(watcher.join).not.toHaveBeenCalledWith(room);
+      expect(ack).toEqual({
+        serverId,
+        channels: {
+          [channelId]: [participantLike({ userId: 'user-ana' })],
+          'quiet-id': [],
+        },
+      });
+    });
+
+    it('rejects a non-member without joining anything', async () => {
+      const watcher = makeClient('socket-1');
+      serverService.findChannelsByServer.mockRejectedValue(
+        new Error('not found'),
+      );
+
+      await expect(
+        gateway.handleWatch({ serverId }, asSocket(watcher), bento),
+      ).rejects.toThrow(BadRequestException);
+      expect(watcher.join).not.toHaveBeenCalled();
+    });
+
+    it('leaves the server room on unwatch', async () => {
+      const watcher = makeClient('socket-1');
+      await gateway.handleWatch({ serverId }, asSocket(watcher), bento);
+
+      const result = await gateway.handleUnwatch(
+        { serverId },
+        asSocket(watcher),
+      );
+
+      expect(watcher.leave).toHaveBeenCalledWith(watchRoom);
+      expect(result).toEqual({ status: 'unwatched', serverId });
     });
   });
 
@@ -501,6 +587,12 @@ describe('VoiceGateway', () => {
       });
       // Stored, so a late joiner renders the right icons.
       expect((await presence.listByChannel(channelId))[0].muted).toBe(true);
+      expect(serverTo).toHaveBeenCalledWith(watchRoom);
+      expect(serverEmit).toHaveBeenCalledWith('voice:presence', {
+        serverId,
+        channelId,
+        participants: [participantLike({ muted: true })],
+      });
     });
 
     it('rejects a socket that is not in the room', async () => {
@@ -528,6 +620,14 @@ describe('VoiceGateway', () => {
         participant: participantLike({ socketId: 'socket-1' }),
       });
       expect(await presence.countByChannel(channelId)).toBe(0);
+      // Watchers learn about it too — the socket is gone, but the participant
+      // it recorded still knows which server room to tell.
+      expect(serverTo).toHaveBeenCalledWith(watchRoom);
+      expect(serverEmit).toHaveBeenCalledWith('voice:presence', {
+        serverId,
+        channelId,
+        participants: [],
+      });
     });
 
     it('does nothing for a socket that never joined a channel', async () => {

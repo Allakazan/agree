@@ -9,6 +9,7 @@ describe('InMemoryVoicePresenceService', () => {
     socketId,
     userId,
     username: userId,
+    serverId: 'server-id',
     muted: false,
     deafened: false,
     joinedAt: '2025-09-07T12:00:00.000Z',

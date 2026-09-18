@@ -7,3 +7,10 @@
 // into the other's rooms. That is why voice keeps its own helper instead of
 // importing `chat.rooms.ts`.
 export const voiceRoom = (channelId: string) => `voice:${channelId}`;
+
+/**
+ * Where server-wide presence goes. A socket in `server:<serverId>` is only
+ * *watching* — it has no voice presence and no say on the signal path, so
+ * joining it never grants what `voice:<channelId>` does.
+ */
+export const serverRoom = (serverId: string) => `server:${serverId}`;

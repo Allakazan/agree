@@ -104,7 +104,9 @@ export class ServerService {
 
   /**
    * Membership gate that also hands back the channel it matched, so a caller
-   * can inspect `type` (voice vs text) without a second round trip.
+   * can inspect `type` (voice vs text) without a second round trip, plus the
+   * id of the server that owns it — voice presence is broadcast per server,
+   * and the query already has that id in hand.
    * `'channels.$'` projects only the array element that satisfied the filter.
    * Returns `null` for a malformed id, an unknown channel, or a non-member —
    * the caller never learns which.
@@ -112,7 +114,7 @@ export class ServerService {
   async findChannelForMember(
     userId: string,
     channelId: string,
-  ): Promise<Channel | null> {
+  ): Promise<{ serverId: string; channel: Channel } | null> {
     const channelObjectId = toObjectId(channelId);
     if (!channelObjectId) return null;
 
@@ -123,12 +125,10 @@ export class ServerService {
     const channel = server?.channels?.[0];
     if (!server || !channel) return null;
 
-    const isMember = await this.usersService.isMemberOfServer(
-      userId,
-      server._id.toString(),
-    );
+    const serverId = server._id.toString();
+    const isMember = await this.usersService.isMemberOfServer(userId, serverId);
 
-    return isMember ? channel : null;
+    return isMember ? { serverId, channel } : null;
   }
 
   /** Same membership gate as {@link findChannelsByServer} — any member can see the roster, not just the owner. */
