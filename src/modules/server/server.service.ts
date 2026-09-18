@@ -7,9 +7,11 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Server } from './schemas/server.schema';
 import { Channel } from './schemas/channel.schema';
+import { CustomEmoji } from './schemas/emoji.schema';
 import { Document, Model } from 'mongoose';
 import { CreateServerDto } from './dto/create-server.dto';
 import { CreateChannelDto } from './dto/create-channel.dto';
+import { CreateEmojiDto } from './dto/create-emoji.dto';
 import { User } from '../users/schemas/user.schema';
 import { UsersService } from '../users/users.service';
 import { toObjectId } from '../../common/objectid';
@@ -180,6 +182,66 @@ export class ServerService {
     }
 
     await this.usersService.removeServerId(targetUserId, serverId);
+  }
+
+  /**
+   * Adds a custom emoji — any member can. Name uniqueness is enforced in the
+   * same update that pushes (`'emojis.name': { $ne }` in the filter), so two
+   * concurrent adds of the same name can't both land; a `null` result here
+   * means the name was already taken, since `requireMember` just proved the
+   * server exists.
+   */
+  async createEmoji(
+    serverId: string,
+    userId: string,
+    dto: CreateEmojiDto,
+  ): Promise<CustomEmoji> {
+    await this.requireMember(serverId, userId);
+
+    const name = dto.name.toLowerCase();
+    const updated = await this.serverModel
+      .findOneAndUpdate(
+        { _id: serverId, 'emojis.name': { $ne: name } },
+        { $push: { emojis: { name, url: dto.url, createdBy: userId } } },
+        { new: true, runValidators: true },
+      )
+      .exec();
+
+    if (!updated) {
+      throw new BadRequestException(
+        `An emoji named "${name}" already exists on this server`,
+      );
+    }
+
+    return updated.emojis[updated.emojis.length - 1];
+  }
+
+  /**
+   * Removes a custom emoji — allowed to whoever added it and to the server
+   * owner. An unknown emoji id is a 404 like an unknown server; a member who
+   * is neither gets a 403.
+   */
+  async removeEmoji(
+    serverId: string,
+    userId: string,
+    emojiId: string,
+  ): Promise<void> {
+    const server = await this.requireMember(serverId, userId);
+
+    const emoji = server.emojis?.find((e) => e._id.toString() === emojiId);
+    if (!emoji) throw new NotFoundException(`Emoji ${emojiId} not found`);
+
+    const isOwner = server.ownerId?.toString() === userId;
+    const isCreator = emoji.createdBy?.toString() === userId;
+    if (!isOwner && !isCreator) {
+      throw new ForbiddenException(
+        'Only the server owner or whoever added the emoji can remove it',
+      );
+    }
+
+    await this.serverModel
+      .updateOne({ _id: serverId }, { $pull: { emojis: { _id: emoji._id } } })
+      .exec();
   }
 
   /** Loads `serverId`, throwing `NotFoundException` if it doesn't exist or `userId` isn't a member — the shared gate behind {@link findChannelsByServer} and {@link findMembers}. */

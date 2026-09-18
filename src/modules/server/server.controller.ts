@@ -12,6 +12,7 @@ import { ServerService } from './server.service';
 import { CreateServerDto } from './dto/create-server.dto';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { AddMemberDto } from './dto/add-member.dto';
+import { CreateEmojiDto } from './dto/create-emoji.dto';
 import { ApiBearerAuth } from '@nestjs/swagger';
 import { User } from '../auth/decorators/user.decorator';
 import { LoggedUser } from '../auth/types/loggedUser.type';
@@ -82,5 +83,32 @@ export class ServerController {
     @User() user: LoggedUser,
   ) {
     return this.serverService.removeMember(serverId, user.sub, targetUserId);
+  }
+
+  // The full list rides along with `GET /server` (`emojis` on each server), so
+  // there is no read route here — only the two writes.
+  @Post(':serverId/emojis')
+  async createEmoji(
+    @Param('serverId') serverId: string,
+    @Body() dto: CreateEmojiDto,
+    @User() user: LoggedUser,
+  ) {
+    const emoji = await this.serverService.createEmoji(serverId, user.sub, dto);
+    return {
+      _id: String(emoji._id),
+      name: emoji.name,
+      url: emoji.url,
+      createdBy: String(emoji.createdBy),
+    };
+  }
+
+  @Delete(':serverId/emojis/:emojiId')
+  @HttpCode(204)
+  removeEmoji(
+    @Param('serverId') serverId: string,
+    @Param('emojiId') emojiId: string,
+    @User() user: LoggedUser,
+  ) {
+    return this.serverService.removeEmoji(serverId, user.sub, emojiId);
   }
 }

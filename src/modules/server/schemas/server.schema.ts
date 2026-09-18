@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 import { Channel, ChannelSchema } from './channel.schema';
+import { CustomEmoji, CustomEmojiSchema } from './emoji.schema';
 
 export type ServerDocument = HydratedDocument<Server>;
 
@@ -20,6 +21,9 @@ export class Server {
 
   @Prop({ type: [ChannelSchema], default: [] })
   channels: Channel[];
+
+  @Prop({ type: [CustomEmojiSchema], default: [] })
+  emojis: CustomEmoji[];
 
   /**
    * The user who created the server — the only one allowed to add/remove

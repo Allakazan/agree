@@ -20,6 +20,8 @@ describe('ServerService', () => {
   let findByIdAndUpdateMock: jest.Mock;
   let findByIdMock: jest.Mock;
   let findOneMock: jest.Mock;
+  let findOneAndUpdateMock: jest.Mock;
+  let updateOneMock: jest.Mock;
   let usersService: {
     addServerId: jest.Mock;
     isMemberOfServer: jest.Mock;
@@ -38,6 +40,9 @@ describe('ServerService', () => {
       findByIdAndUpdateMock(...args);
     static findById = (...args: unknown[]): unknown => findByIdMock(...args);
     static findOne = (...args: unknown[]): unknown => findOneMock(...args);
+    static findOneAndUpdate = (...args: unknown[]): unknown =>
+      findOneAndUpdateMock(...args);
+    static updateOne = (...args: unknown[]): unknown => updateOneMock(...args);
   }
 
   beforeEach(async () => {
@@ -46,6 +51,8 @@ describe('ServerService', () => {
     findByIdAndUpdateMock = jest.fn();
     findByIdMock = jest.fn();
     findOneMock = jest.fn();
+    findOneAndUpdateMock = jest.fn();
+    updateOneMock = jest.fn();
     usersService = {
       addServerId: jest.fn(),
       isMemberOfServer: jest.fn(),
@@ -449,6 +456,125 @@ describe('ServerService', () => {
         service.removeMember('server-id', 'owner-id', 'owner-id'),
       ).rejects.toThrow(BadRequestException);
       expect(usersService.removeServerId).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createEmoji', () => {
+    const dto = { name: 'Pepe', url: 'https://cdn.example.com/pepe.gif' };
+    const mockServer = (value: unknown) =>
+      findByIdMock.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(value),
+      });
+
+    it('pushes the emoji (lowercased) for a member and returns it', async () => {
+      mockServer({ _id: 'server-id' });
+      usersService.isMemberOfServer.mockResolvedValue(true);
+      const created = { _id: 'emoji-id', name: 'pepe', url: dto.url };
+      findOneAndUpdateMock.mockReturnValue({
+        exec: jest
+          .fn()
+          .mockResolvedValue({ emojis: [{ name: 'old' }, created] }),
+      });
+
+      const result = await service.createEmoji('server-id', 'user-id', dto);
+
+      expect(findOneAndUpdateMock).toHaveBeenCalledWith(
+        { _id: 'server-id', 'emojis.name': { $ne: 'pepe' } },
+        {
+          $push: {
+            emojis: { name: 'pepe', url: dto.url, createdBy: 'user-id' },
+          },
+        },
+        { new: true, runValidators: true },
+      );
+      expect(result).toBe(created);
+    });
+
+    it('throws NotFoundException for a non-member without writing', async () => {
+      mockServer({ _id: 'server-id' });
+      usersService.isMemberOfServer.mockResolvedValue(false);
+
+      await expect(
+        service.createEmoji('server-id', 'user-id', dto),
+      ).rejects.toThrow(NotFoundException);
+      expect(findOneAndUpdateMock).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when the name is already taken', async () => {
+      mockServer({ _id: 'server-id' });
+      usersService.isMemberOfServer.mockResolvedValue(true);
+      findOneAndUpdateMock.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      });
+
+      await expect(
+        service.createEmoji('server-id', 'user-id', dto),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('removeEmoji', () => {
+    const emojiId = new Types.ObjectId();
+    const mockServerWithEmoji = (ownerId: string, createdBy: string) =>
+      findByIdMock.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({
+          _id: 'server-id',
+          ownerId: { toString: () => ownerId },
+          emojis: [
+            {
+              _id: emojiId,
+              name: 'pepe',
+              url: 'https://cdn.example.com/pepe.gif',
+              createdBy: { toString: () => createdBy },
+            },
+          ],
+        }),
+      });
+
+    beforeEach(() => {
+      usersService.isMemberOfServer.mockResolvedValue(true);
+      updateOneMock.mockReturnValue({ exec: jest.fn().mockResolvedValue({}) });
+    });
+
+    it('pulls the emoji when the caller is the owner', async () => {
+      mockServerWithEmoji('owner-id', 'someone-else');
+
+      await service.removeEmoji('server-id', 'owner-id', emojiId.toString());
+
+      expect(updateOneMock).toHaveBeenCalledWith(
+        { _id: 'server-id' },
+        { $pull: { emojis: { _id: emojiId } } },
+      );
+    });
+
+    it('pulls the emoji when the caller added it', async () => {
+      mockServerWithEmoji('owner-id', 'creator-id');
+
+      await service.removeEmoji('server-id', 'creator-id', emojiId.toString());
+
+      expect(updateOneMock).toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException for a member who is neither', async () => {
+      mockServerWithEmoji('owner-id', 'creator-id');
+
+      await expect(
+        service.removeEmoji('server-id', 'bystander', emojiId.toString()),
+      ).rejects.toThrow(ForbiddenException);
+      expect(updateOneMock).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException for an unknown emoji id', async () => {
+      mockServerWithEmoji('owner-id', 'creator-id');
+
+      await expect(
+        service.removeEmoji(
+          'server-id',
+          'owner-id',
+          new Types.ObjectId().toString(),
+        ),
+      ).rejects.toThrow(NotFoundException);
+      expect(updateOneMock).not.toHaveBeenCalled();
     });
   });
 });

@@ -17,6 +17,8 @@ describe('ServerController', () => {
     findMembers: jest.Mock;
     addMember: jest.Mock;
     removeMember: jest.Mock;
+    createEmoji: jest.Mock;
+    removeEmoji: jest.Mock;
   };
   const user: LoggedUser = { sub: 'user-id', username: 'bruno' };
   const dto: CreateServerDto = {
@@ -35,6 +37,8 @@ describe('ServerController', () => {
       findMembers: jest.fn(),
       addMember: jest.fn(),
       removeMember: jest.fn(),
+      createEmoji: jest.fn(),
+      removeEmoji: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -155,6 +159,44 @@ describe('ServerController', () => {
         'server-id',
         user.sub,
         'target-id',
+      );
+    });
+  });
+
+  describe('createEmoji', () => {
+    it('delegates to ServerService.createEmoji and returns the public shape', async () => {
+      const dto = { name: 'pepe', url: 'https://cdn.example.com/pepe.gif' };
+      serverService.createEmoji.mockResolvedValue({
+        _id: { toString: () => 'emoji-id' },
+        name: 'pepe',
+        url: dto.url,
+        createdBy: { toString: () => user.sub },
+      });
+
+      const result = await controller.createEmoji('server-id', dto, user);
+
+      expect(serverService.createEmoji).toHaveBeenCalledWith(
+        'server-id',
+        user.sub,
+        dto,
+      );
+      expect(result).toEqual({
+        _id: 'emoji-id',
+        name: 'pepe',
+        url: dto.url,
+        createdBy: user.sub,
+      });
+    });
+  });
+
+  describe('removeEmoji', () => {
+    it('delegates to ServerService.removeEmoji', async () => {
+      await controller.removeEmoji('server-id', 'emoji-id', user);
+
+      expect(serverService.removeEmoji).toHaveBeenCalledWith(
+        'server-id',
+        user.sub,
+        'emoji-id',
       );
     });
   });
