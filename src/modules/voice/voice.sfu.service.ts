@@ -49,8 +49,6 @@ export type VoiceSfuPullResult = {
 };
 
 export type VoiceSfuCloseResult = {
-  sessionDescription?: SessionDescription;
-  requiresImmediateRenegotiation: boolean;
   /** Names of this socket's own tracks the close took off the room. */
   unpublished: string[];
 };
@@ -305,7 +303,6 @@ export class VoiceSfuService {
     channelId: string,
     socketId: string,
     requestedMids: string[],
-    offer: SessionDescription,
   ): Promise<VoiceSfuCloseResult> {
     return this.serialize(socketId, async () => {
       const state = await this.requireSfuState(channelId, socketId);
@@ -327,8 +324,8 @@ export class VoiceSfuService {
           .join(', ')}`,
       );
 
-      const response = await this.sfu('close', socketId, () =>
-        this.client.closeTracks(state.sessionId, mids, offer),
+      await this.sfu('close', socketId, () =>
+        this.client.closeTracks(state.sessionId, mids),
       );
 
       const unpublished = mids
@@ -344,12 +341,7 @@ export class VoiceSfuService {
         await this.presence.removeTracks(channelId, socketId, unpublished);
       }
 
-      return {
-        sessionDescription: response.sessionDescription,
-        requiresImmediateRenegotiation:
-          response.requiresImmediateRenegotiation ?? false,
-        unpublished,
-      };
+      return { unpublished };
     });
   }
 

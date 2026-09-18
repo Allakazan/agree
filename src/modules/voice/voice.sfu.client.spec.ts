@@ -116,21 +116,23 @@ describe('CloudflareSfuClient', () => {
     });
   });
 
-  it('closes with renegotiation, never with force', async () => {
+  it('closes with force, never with an offer', async () => {
     fetchMock.mockReturnValue(respondWith({ tracks: [] }));
 
-    await client.closeTracks('session-1', ['0'], offer);
+    await client.closeTracks('session-1', ['0']);
 
     // The live API requires `force`: without it the body is refused with a 400
-    // decoding_error, whatever the OpenAPI spec says.
+    // decoding_error, whatever the OpenAPI spec says. It is `true` here so the
+    // close never renegotiates — an offer with a port-0 m-section frees the
+    // mid for Cloudflare to recycle with new header-extension ids, which
+    // Chrome refuses (see `VoiceSfuCloseDto`).
     expect(call()).toMatchObject({
       url: `${API}/sessions/session-1/tracks/close`,
       method: 'PUT',
     });
     expect(call().body).toEqual({
       tracks: [{ mid: '0' }],
-      sessionDescription: offer,
-      force: false,
+      force: true,
     });
   });
 

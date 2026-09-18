@@ -383,7 +383,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return this.sfuService.pull(dto.channelId, client.id, dto.tracks);
   }
 
-  /** Completes a negotiation Cloudflare started with a pull or a close. */
+  /** Completes a negotiation Cloudflare started with a pull — the only one it starts. */
   @SubscribeMessage('voice:sfu:renegotiate')
   async handleSfuRenegotiate(
     @MessageBody(new WsValidationPipe()) dto: VoiceSfuRenegotiateDto,
@@ -401,27 +401,24 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   /**
-   * Closes tracks on the caller's session, published and pulled alike, always
-   * with the client's offer. Closing a published one takes it off the room —
-   * which is also how a camera is turned off: Cloudflare drops a track after
-   * 30s without packets, but presence would keep announcing it.
+   * Closes tracks on the caller's session, published and pulled alike, and
+   * never renegotiates (see `VoiceSfuCloseDto`). Closing a published one takes
+   * it off the room — which is also how a camera is turned off: Cloudflare
+   * drops a track after 30s without packets, but presence would keep
+   * announcing it.
    */
   @SubscribeMessage('voice:sfu:close')
   async handleSfuClose(
     @MessageBody(new WsValidationPipe()) dto: VoiceSfuCloseDto,
     @ConnectedSocket() client: Socket,
     @User() user: LoggedUser,
-  ): Promise<{
-    sessionDescription?: SessionDescription;
-    requiresImmediateRenegotiation: boolean;
-  }> {
+  ): Promise<{ status: string; mids: string[] }> {
     this.assertOnSfu(client, dto.channelId);
 
     const result = await this.sfuService.close(
       dto.channelId,
       client.id,
       dto.mids,
-      dto.sessionDescription,
     );
 
     for (const trackName of result.unpublished) {
@@ -432,10 +429,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
     }
 
-    return {
-      sessionDescription: result.sessionDescription,
-      requiresImmediateRenegotiation: result.requiresImmediateRenegotiation,
-    };
+    return { status: 'closed', mids: dto.mids };
   }
 
   /** Switches a pulled video track to another simulcast layer. */

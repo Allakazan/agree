@@ -478,7 +478,7 @@ Cliente → servidor (todos exigem já ter feito `voice:join`):
 | `voice:sfu:publish` | `{ channelId, sessionDescription: offer, tracks: [{ mid, source, contentHint? }] }` | `{ sessionDescription: answer, tracks: [{ mid, trackName }] }` |
 | `voice:sfu:pull` | `{ channelId, tracks: [{ userId, trackName, preferredRid? }] }` (até 64) | `{ sessionDescription?: offer, requiresImmediateRenegotiation, tracks: [{ mid, userId, trackName }] }` |
 | `voice:sfu:renegotiate` | `{ channelId, sessionDescription: answer }` | `{ status: 'renegotiated' }` |
-| `voice:sfu:close` | `{ channelId, mids: string[], sessionDescription: offer }` (offer **obrigatória**) | `{ sessionDescription?, requiresImmediateRenegotiation }` |
+| `voice:sfu:close` | `{ channelId, mids: string[] }` (**sem** offer) | `{ status: 'closed', mids }` |
 | `voice:sfu:layer` | `{ channelId, mid, preferredRid }` | `{ status: 'updated', mid, preferredRid }` |
 
 Servidor → cliente:
@@ -619,25 +619,40 @@ Cloudflare continua baixando a camada sozinha sob congestionamento.
 uma track 30 s depois que os pacotes param, mas a presença continuaria
 anunciando uma track morta para todo mundo.
 
+O close **não renegocia** e não leva offer. Aposente o transceiver no lugar,
+sem `stop()`:
+
 ```ts
 await this.negotiate(async () => {
-  const mid = transceiver.mid; // leia antes do stop
-  transceiver.stop();
-  await this.pc.setLocalDescription(await this.pc.createOffer());
-  const ack = await this.socket.timeout(10_000).emitWithAck('voice:sfu:close', {
-    channelId, mids: [mid], sessionDescription: this.pc.localDescription,
+  const mid = transceiver.mid; // leia antes de aposentar
+  await transceiver.sender.replaceTrack(null); // para de mandar na hora
+  transceiver.direction = 'inactive';          // nunca stop() — ver abaixo
+  await this.socket.timeout(10_000).emitWithAck('voice:sfu:close', {
+    channelId, mids: [mid],
   });
-  if (ack.sessionDescription) await this.pc.setRemoteDescription(ack.sessionDescription);
 });
 ```
 
 **Fechar um pull** (de um peer que saiu, `peer-left` / `track-unpublished`) é o
-**mesmo fluxo**: `transceiver.stop()` nos transceivers recvonly desses mids,
-offer e `voice:sfu:close` com ela. Dá para fechar vários mids numa offer só.
-Não existe close sem offer: o servidor recusa um `close` sem
-`sessionDescription`. A Cloudflare tem um modo `force` (corta o fluxo sem
-renegociar), mas ele deixaria um transceiver morto no seu PC, então o
-contrato tem um close só.
+**mesmo fluxo**, nos transceivers recvonly desses mids. Dá para fechar vários
+mids numa chamada só (até 64).
+
+> **Nunca chame `transceiver.stop()` num transceiver já negociado.** Ele põe a
+> m-section em porta 0 na sua próxima offer, o que libera o slot para
+> *m-line recycling*: a Cloudflare reaproveita aquele mid na offer seguinte
+> dela (um pull) renumerando os `a=extmap`, e o Chrome — que guarda o mapa de
+> header extensions **por mid** pela vida do `RTCPeerConnection` — recusa com
+> `RTP extension ID reassignment not supported (collision on active MID n)`.
+> Isso envenena o PC inteiro: dali em diante toda negociação estoura o mesmo
+> erro, `createOffer` incluído, e nem o close desfaz. Era o bug de reabrir uma
+> live. `inactive` mantém o slot ocupado, então nenhum mid volta a ficar livre.
+> O preço é uma m-section morta por track fechada (sem encoder, sem banda). Se
+> a Cloudflare reaproveitar um desses transceivers num pull, o `ontrack` não
+> dispara de novo — pegue a track de `transceiver.receiver.track`.
+>
+> Se uma negociação falhar mesmo assim, teste o PC com um `createOffer()`: se
+> ele estourar, o PC não tem mais volta — refaça a sessão (`voice:leave` +
+> `voice:join`), porque a sessão da Cloudflare é presa a esse PC.
 
 ### Migração (`voice:topology-changed`)
 

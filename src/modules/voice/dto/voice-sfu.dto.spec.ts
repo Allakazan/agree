@@ -46,27 +46,30 @@ describe('SFU DTOs', () => {
       ).toEqual([]);
     });
 
-    it('on close, which no longer has a forced mode', async () => {
-      expect(
-        await invalid(VoiceSfuCloseDto, { channelId, mids: ['0'] }),
-      ).toEqual(['sessionDescription']);
-      expect(
-        await invalid(VoiceSfuCloseDto, {
-          channelId,
-          mids: ['0'],
-          sessionDescription: offer,
-        }),
-      ).toEqual([]);
-    });
   });
 
   it('refuses the wrong half of the negotiation', async () => {
     expect(
-      await invalid(VoiceSfuCloseDto, {
+      await invalid(VoiceSfuPublishDto, {
         channelId,
-        mids: ['0'],
+        tracks: [{ mid: '0', source: 'mic' }],
         sessionDescription: answer,
       }),
     ).toEqual(['sessionDescription']);
+    expect(
+      await invalid(VoiceSfuRenegotiateDto, {
+        channelId,
+        sessionDescription: offer,
+      }),
+    ).toEqual(['sessionDescription']);
+  });
+
+  // The close is forced (`force: true`) precisely so no offer is ever sent:
+  // one with a port-0 m-section frees the mid for Cloudflare to recycle with
+  // new header-extension ids, which Chrome refuses for the life of the PC.
+  it('takes no session description on close', async () => {
+    expect(await invalid(VoiceSfuCloseDto, { channelId, mids: ['0'] })).toEqual(
+      [],
+    );
   });
 });
