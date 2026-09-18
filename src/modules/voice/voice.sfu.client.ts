@@ -124,23 +124,19 @@ export class CloudflareSfuClient {
   }
 
   /**
-   * Closes tracks by mid, renegotiating with the client's offer.
+   * Closes tracks by mid, without renegotiating: `force: true` stops the data
+   * flow and leaves the client's transceiver in place, which is what keeps the
+   * mid out of Cloudflare's reach on its next offer (see `VoiceSfuCloseDto`).
    *
    * `force` is **required** by the live API, whatever the OpenAPI spec says —
    * checked against it directly: a body without `force` gets `400
-   * decoding_error ... force`, and `force: false` without an offer gets `406
-   * sessionDescription must be present`. `sessionDescription` + `force: false`
-   * is the spec's own example.
+   * decoding_error ... force`, `force: false` without an offer gets `406
+   * sessionDescription must be present`, and `force: true` alone passes.
    */
-  closeTracks(
-    sessionId: string,
-    mids: string[],
-    offer: SessionDescription,
-  ): Promise<SfuTracksResponse> {
+  closeTracks(sessionId: string, mids: string[]): Promise<SfuTracksResponse> {
     return this.tracksRequest('PUT', sessionId, 'tracks/close', {
       tracks: mids.map((mid) => ({ mid })),
-      sessionDescription: offer,
-      force: false,
+      force: true,
     });
   }
 

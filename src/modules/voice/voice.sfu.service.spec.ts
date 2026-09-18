@@ -54,7 +54,6 @@ const cameraSection = (mid = '1'): Section => ({
 const answer: SessionDescription = { type: 'answer', sdp: 'v=0 answer' };
 const cfOffer: SessionDescription = { type: 'offer', sdp: 'v=0 cf offer' };
 /** The client's offer after stopping the transceivers it is closing. */
-const closeOffer: SessionDescription = { type: 'offer', sdp: 'v=0 close' };
 
 describe('VoiceSfuService', () => {
   let service: VoiceSfuService;
@@ -483,18 +482,9 @@ describe('VoiceSfuService', () => {
         { mid: '1', source: 'camera' },
       ]);
 
-      const result = await service.close(
-        channelId,
-        'socket-ana',
-        ['1'],
-        closeOffer,
-      );
+      const result = await service.close(channelId, 'socket-ana', ['1']);
 
-      expect(client.closeTracks).toHaveBeenCalledWith(
-        'session-ana',
-        ['1'],
-        closeOffer,
-      );
+      expect(client.closeTracks).toHaveBeenCalledWith('session-ana', ['1']);
       expect(result.unpublished).toEqual(['camera']);
       expect(
         (await presence.get(channelId, 'socket-ana'))?.tracks.map(
@@ -513,12 +503,7 @@ describe('VoiceSfuService', () => {
         { userId: 'user-bento', trackName: 'camera' },
       ]);
 
-      const result = await service.close(
-        channelId,
-        'socket-ana',
-        ['5'],
-        closeOffer,
-      );
+      const result = await service.close(channelId, 'socket-ana', ['5']);
       await service.pull(channelId, 'socket-ana', [
         { userId: 'user-bento', trackName: 'camera' },
       ]);
@@ -534,14 +519,14 @@ describe('VoiceSfuService', () => {
       ]);
 
       await expect(
-        service.close(channelId, 'socket-ana', ['9'], closeOffer),
+        service.close(channelId, 'socket-ana', ['9']),
       ).rejects.toThrow('Unknown track mid 9');
       expect(client.closeTracks).not.toHaveBeenCalled();
     });
 
     it('refuses a socket with no session yet', async () => {
       await expect(
-        service.close(channelId, 'socket-ana', ['0'], closeOffer),
+        service.close(channelId, 'socket-ana', ['0']),
       ).rejects.toThrow('You have no media session yet');
     });
   });

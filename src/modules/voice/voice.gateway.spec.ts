@@ -736,11 +736,7 @@ describe('VoiceGateway', () => {
         await publishCamera(ana1, ana);
 
         await gateway.handleSfuClose(
-          {
-            channelId,
-            mids: ['0'],
-            sessionDescription: { type: 'offer', sdp: 'v=0 close' },
-          },
+          { channelId, mids: ['0'] },
           asSocket(ana1),
           ana,
         );

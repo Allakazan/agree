@@ -38,13 +38,13 @@ export const SIMULCAST_PROFILES: Record<VideoProfileName, SimulcastProfile> = {
     encodings: [
       {
         rid: 'f',
-        maxBitrate: 1_200_000,
+        maxBitrate: 1_500_000,
         maxFramerate: 30,
         scaleResolutionDownBy: 1,
       },
       {
         rid: 'h',
-        maxBitrate: 500_000,
+        maxBitrate: 700_000,
         maxFramerate: 30,
         scaleResolutionDownBy: 2,
       },

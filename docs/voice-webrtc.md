@@ -214,7 +214,7 @@ Client → server, all acked, all behind `assertInRoom`:
 | `voice:sfu:publish` | `{ channelId, sessionDescription: offer, tracks: [{ mid, source, contentHint? }] }` | Validates the offer, opens the session lazily, `tracks/new` local, records the tracks, broadcasts `voice:track-published`. On a mesh room with video it **promotes** the room — after the Cloudflare call, so a refused publish leaves the room on the mesh. An audio-only publish on a mesh room is refused. |
 | `voice:sfu:pull` | `{ channelId, tracks: [{ userId, trackName, preferredRid? }] }` | Batched (≤ 64, Cloudflare's per-call limit). Refuses your own track, a publisher not in the room, a track not published, a track already pulled, a layer the track lacks. Video defaults to the **cheapest** layer. Acks Cloudflare's offer. |
 | `voice:sfu:renegotiate` | `{ channelId, sessionDescription: answer }` | Completes a negotiation Cloudflare started. |
-| `voice:sfu:close` | `{ channelId, mids[], sessionDescription: offer }` | Closes mids on the caller's own session, pulled and published alike. Published ones are unpublished (`voice:track-unpublished`). The offer is **required**, and Cloudflare gets `{ tracks, sessionDescription, force: false }`. Checked against the live API, which disagrees with its OpenAPI: `force` is **required** (without it: `400 decoding_error ... force`), and `force: false` needs the offer (`406 sessionDescription must be present`). `force: true` alone would pass, but it only stops the data flow and leaves a dead transceiver on the client, so the contract has one close only. A forced close would also leave a dead transceiver on the client. |
+| `voice:sfu:close` | `{ channelId, mids[] }` | Closes mids on the caller's own session, pulled and published alike. Published ones are unpublished (`voice:track-unpublished`). **No offer, no renegotiation**: Cloudflare gets `{ tracks, force: true }` and the client leaves the transceiver in place, dead. See "Why the close never renegotiates" below. Checked against the live API, which disagrees with its OpenAPI: `force` is **required** (without it: `400 decoding_error ... force`), `force: false` needs the offer (`406 sessionDescription must be present`), and `force: true` alone passes. |
 | `voice:sfu:layer` | `{ channelId, mid, preferredRid }` | `tracks/update` on a pulled video track. |
 
 Server → client: `voice:topology-changed { channelId, topology: 'sfu' }`, `voice:track-published { channelId, userId, track }`, `voice:track-unpublished { channelId, userId, trackName }`.
@@ -222,6 +222,22 @@ Server → client: `voice:topology-changed { channelId, topology: 'sfu' }`, `voi
 Changes to Phase 1 events: `voice:join` past `meshMax` now promotes instead of refusing (the ack says `topology: 'sfu'`; existing members get `topology-changed`), capped at `VOICE_SFU_MAX`; participants carry `tracks`; the ack carries `video` (`null` without an SFU). `voice:signal` is refused in an `sfu` room, so a mesh-only client cannot keep running P2P past the limit.
 
 `leave`, `disconnect` and eviction make **no Cloudflare calls**: presence drops the session and tracks, `peer-left` tells pullers to close theirs, and Cloudflare garbage-collects a track 30 s after its packets stop. A publisher nobody pulls costs no egress. `handleDisconnect` stays free of outside I/O.
+
+### Why the close never renegotiates
+
+A close used to carry the client's offer (`force: false`). That offer is the one place a client sends an m-section with **port 0** — what `transceiver.stop()` generates — and a rejected m-section frees its slot for **m-line recycling**. Cloudflare then reuses that mid on its next offer (always a pull), and numbers the `a=extmap` header-extension ids from scratch, because its own answer to the close came back with no `a=extmap` at all. Chrome keeps the extension map **per mid** for the life of the `RTCPeerConnection` and refuses the remap:
+
+```
+Failed to set remote offer sdp: RTP extension ID reassignment not supported
+(collision on active MID 2, id=1, old_uri="urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id",
+new_uri="http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01")
+```
+
+It poisons the whole PC, not just that exchange: every later negotiation throws the same error, `createOffer` included, so the client cannot even close its way out. Reopening a screenshare hit it every time — the first live worked, the second one killed the puller's session until it rejoined.
+
+So the rule is **nobody ever offers port 0**: the close sends no offer (`force: true`), and the client retires a transceiver with `replaceTrack(null)` + `direction = 'inactive'` instead of `stop()`, which keeps the slot occupied in every later offer. No slot ever frees, so no mid is ever recycled, so renumbering has nothing to collide with — Cloudflare can only append a fresh mid, which carries no prior map. The cost is one dead m-section per closed track: no encoder, no egress, a few hundred bytes of SDP. If Cloudflare reuses one of those transceivers for a later pull, the client takes the track off the receiver (`ontrack` does not fire again).
+
+The alternative on the table was splitting send and receive into two `RTCPeerConnection`s (and two Cloudflare sessions), so that each PC only ever has one offerer. That removes the same collision, but it costs two session ids per socket and a mid keyspace per PC — `published` and `pulled` could no longer share one map, since both PCs number mids from 0.
 
 ### Migration
 

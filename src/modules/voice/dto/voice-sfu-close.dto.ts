@@ -1,25 +1,26 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
-  IsDefined,
   IsNotEmpty,
   IsString,
-  ValidateNested,
 } from 'class-validator';
 import { IsObjectID } from 'src/common/decorators/isObjectID';
-import { SdpOfferDto } from './session-description.dto';
 
 /**
  * Closes tracks on the caller's own session — published ones (which unpublishes
  * them for the room) and pulled ones alike.
  *
- * The offer is required: the client stops the transceivers, offers, and
- * applies the answer, so both ends drop the m-sections together. Cloudflare
- * also has a `force` mode (stop the data flow, no renegotiation), but it would
- * leave a dead transceiver on the client, so this contract has one close only.
+ * **There is no offer, and no renegotiation.** Cloudflare gets `force: true`,
+ * which leaves a dead transceiver on the client — and that is the point. A
+ * close that renegotiates makes the client offer the m-section with port 0,
+ * which frees the slot for Cloudflare to recycle the mid on its next offer
+ * (a pull) with a fresh set of header-extension ids. Chrome keeps the
+ * extension map per mid for the life of the `RTCPeerConnection` and refuses
+ * the remap — `RTP extension ID reassignment not supported (collision on
+ * active MID n)` — which killed every negotiation on that PC from then on.
+ * Nobody ever offering port 0 is what keeps that mid out of reach.
  */
 export class VoiceSfuCloseDto {
   @IsString()
@@ -34,10 +35,4 @@ export class VoiceSfuCloseDto {
   @IsNotEmpty({ each: true })
   @ApiProperty({ type: [String] })
   mids: string[];
-
-  @IsDefined()
-  @ValidateNested()
-  @Type(() => SdpOfferDto)
-  @ApiProperty({ type: SdpOfferDto })
-  sessionDescription: SdpOfferDto;
 }
