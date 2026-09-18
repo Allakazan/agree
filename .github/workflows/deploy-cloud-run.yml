@@ -186,6 +186,7 @@ jobs:
           TURN_USER: ${{ vars.TURN_USER }}
           CF_TURN_KEY_ID: ${{ vars.CF_TURN_KEY_ID }}
           CF_TURN_TTL: ${{ vars.CF_TURN_TTL }}
+          CF_REALTIME_APP_ID: ${{ vars.CF_REALTIME_APP_ID }}
           STUN_URL: ${{ vars.STUN_URL }}
           EXTRA_ENV_VARS: ${{ vars.EXTRA_ENV_VARS }}
         run: |
@@ -195,7 +196,7 @@ jobs:
           pairs="NODE_ENV=production"
           for name in ORIGIN VOICE_MESH_MAX VIDEO_MESH_MAX VOICE_MAX_AUDIO_BITRATE \
                       VOICE_UPLINK_BUDGET TURN_URL TURN_USER CF_TURN_KEY_ID \
-                      CF_TURN_TTL STUN_URL; do
+                      CF_TURN_TTL CF_REALTIME_APP_ID STUN_URL; do
             value="${!name:-}"
             if [ -n "$value" ]; then
               pairs="$pairs@@$name=$value"
