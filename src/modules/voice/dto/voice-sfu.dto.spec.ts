@@ -45,7 +45,6 @@ describe('SFU DTOs', () => {
         }),
       ).toEqual([]);
     });
-
   });
 
   it('refuses the wrong half of the negotiation', async () => {
